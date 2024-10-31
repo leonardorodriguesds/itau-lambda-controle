@@ -1,0 +1,7 @@
+{
+    "EventSourceArn": "arn:aws:sqs:us-east-1:000000000000:sqs-lambda-controle",
+    "FunctionName": "lambda-controle",
+    "Enabled": true,
+    "BatchSize": 1
+  }
+  

@@ -1,0 +1,46 @@
+# Diretórios e arquivos
+SRC_DIR=src
+ZIP_FILE=$(SRC_DIR)/function.zip
+LAMBDA_JSON=localstack/lambda.json
+SQS_JSON=localstack/sqs.json
+STEPFUNCTION_JSON=localstack/stepfunction.json
+SQS_TO_LAMBDA_JSON=localstack/sqs-to-lambda.json
+LAMBDA_NAME=lambda-controle
+
+# Função de criação do zip de todo o conteúdo da pasta src
+zip:
+	cd $(SRC_DIR) && zip -r function.zip .
+
+# Função para criar a Lambda no LocalStack
+create_lambda: zip
+	awslocal lambda create-function \
+		--cli-input-json file://$(LAMBDA_JSON) \
+		--zip-file fileb://$(ZIP_FILE)
+
+# Função para criar a fila SQS no LocalStack
+create_sqs:
+	awslocal sqs create-queue --cli-input-json file://$(SQS_JSON)
+
+# Função para criar a Step Function no LocalStack
+create_step_function:
+	awslocal stepfunctions create-state-machine \
+		--cli-input-json file://$(STEPFUNCTION_JSON)
+
+# Função para criar o mapeamento de evento SQS para Lambda
+create_sqs_event:
+	awslocal lambda create-event-source-mapping \
+		--cli-input-json file://$(SQS_TO_LAMBDA_JSON)
+
+# Função para atualizar a Lambda no LocalStack
+update_lambda: zip
+	awslocal lambda update-function-code \
+		--function-name $(LAMBDA_NAME) \
+		--zip-file fileb://$(ZIP_FILE)
+
+# Fluxo para criar todos os recursos
+create_all_resources: create_lambda create_sqs create_step_function create_sqs_event
+	@echo "Todos os recursos foram criados com sucesso no LocalStack."
+
+# Fluxo para atualizar os recursos existentes
+update_resources: update_lambda
+	@echo "Recursos atualizados com sucesso no LocalStack."

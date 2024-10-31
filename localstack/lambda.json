@@ -1,0 +1,20 @@
+{
+    "FunctionName": "lambda-controle",
+    "Runtime": "python3.8",
+    "Role": "arn:aws:iam::000000000000:role/DummyRole",
+    "Handler": "main.lambda_handler",
+    "Code": {
+      "S3Bucket": "localstack-bucket",
+      "S3Key": "function.zip"
+    },
+    "Description": "Lambda function for processing SQS messages",
+    "Timeout": 15,
+    "MemorySize": 128,
+    "Publish": true,
+    "Environment": {
+      "Variables": {
+        "ENV": "local"
+      }
+    }
+  }
+  
