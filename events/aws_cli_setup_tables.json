@@ -1,0 +1,34 @@
+{
+    "Records": [
+        {
+            "body": {
+                "event": "add_table",
+                "data": {
+                    "name": "tbjf001_op_pdz_prep",
+                    "description": "Tabela de operações preparadas do PDZ",
+                    "requires_approval": false,
+                    "partitions": [
+                        {
+                            "name": "ano_mes_referencia",
+                            "type": "int",
+                            "is_required": true
+                        },
+                        {
+                            "name": "versao_processamento",
+                            "type": "int",
+                            "is_required": true
+                        },
+                        {
+                            "name": "identificador_empresa",
+                            "type": "int",
+                            "is_required": true
+                        }
+                    ],
+                    "dependencies": [],
+                    "tasks": []
+                },
+                "user": "lrcxpnu"
+            }
+        }
+    ]
+}

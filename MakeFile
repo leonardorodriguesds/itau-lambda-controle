@@ -1,21 +1,45 @@
 # Diretórios e arquivos
-SRC_DIR=src
+SRC_DIR=app
 ZIP_FILE=$(SRC_DIR)/function.zip
 LAMBDA_JSON=localstack/lambda.json
 SQS_JSON=localstack/sqs.json
 STEPFUNCTION_JSON=localstack/stepfunction.json
 SQS_TO_LAMBDA_JSON=localstack/sqs-to-lambda.json
 LAMBDA_NAME=lambda-controle
+BUILD_DIR=build
+LAYER_DIR=layer
+LAYER_ZIP=$(LAYER_DIR)/layer.zip
 
-# Função de criação do zip de todo o conteúdo da pasta src
+# Função de criação do zip de todo o conteúdo da pasta src com dependências
+create_layer:
+	rm -rf $(LAYER_DIR)
+	mkdir -p $(LAYER_DIR)/python/lib/python3.8/site-packages
+	pip install -r requirements.txt -t $(LAYER_DIR)/python/lib/python3.8/site-packages
+	pip install sqlalchemy -t $(LAYER_DIR)/python/lib/python3.8/site-packages
+	cd $(LAYER_DIR) && zip -r layer.zip python
+	@echo "Layer ZIP criado em $(LAYER_ZIP)"
+
+# Função para criar o zip da Lambda sem dependências
 zip:
-	cd $(SRC_DIR) && zip -r function.zip .
+	rm -rf $(BUILD_DIR)
+	mkdir -p $(BUILD_DIR)
+	cp -r $(SRC_DIR)/* $(BUILD_DIR)
+	cd $(BUILD_DIR) && zip -r ../$(ZIP_FILE) .
 
 # Função para criar a Lambda no LocalStack
-create_lambda: zip
-	awslocal lambda create-function \
+create_lambda: zip create_layer
+	@awslocal lambda publish-layer-version --layer-name $(LAMBDA_NAME)-dependencies --zip-file fileb://$(LAYER_ZIP) 2>/dev/null
+	@echo "Camada publicada para $(LAMBDA_NAME)-dependencies"
+	@awslocal lambda create-function \
 		--cli-input-json file://$(LAMBDA_JSON) \
-		--zip-file fileb://$(ZIP_FILE)
+		--zip-file fileb://$(ZIP_FILE) \
+		--layers $$(awslocal lambda list-layers --query "Layers[?LayerName=='$(LAMBDA_NAME)-dependencies'].LatestMatchingVersion.LayerVersionArn" --output text 2>/dev/null | grep '^arn:' | awk '{print $$1}') 2>/dev/null
+
+# Função para limpar todos os arquivos e pastas criados
+clean:
+	rm -rf $(BUILD_DIR) $(LAYER_DIR) $(ZIP_FILE)
+	@echo "Todos os arquivos e diretórios temporários foram removidos."
+
 
 # Função para criar a fila SQS no LocalStack
 create_sqs:
@@ -38,9 +62,41 @@ update_lambda: zip
 		--zip-file fileb://$(ZIP_FILE)
 
 # Fluxo para criar todos os recursos
-create_all_resources: create_lambda create_sqs create_step_function create_sqs_event
+create_all_resources: create_lambda create_sqs create_step_function create_sqs_event clean
 	@echo "Todos os recursos foram criados com sucesso no LocalStack."
 
 # Fluxo para atualizar os recursos existentes
 update_resources: update_lambda
 	@echo "Recursos atualizados com sucesso no LocalStack."
+
+# Função para configurar as tabelas no LocalStack invocando a Lambda com JSON de setup
+setup_tables:
+	awslocal lambda invoke \
+		--function-name arn:aws:lambda:us-east-2:000000000000:function:lambda-controle \
+		--payload file://events/aws_cli_setup_tables.json \
+		outputfile.txt && cat outputfile.txt
+
+# Função para destruir todos os recursos no LocalStack
+destroy_all_resources:
+	@echo "Destruindo todos os recursos no LocalStack..."
+	# Remover camadas Lambda
+	@awslocal lambda list-layers --query "Layers[*].LayerName" --output text | xargs -I {} awslocal lambda delete-layer-version --layer-name {} --version-number 1
+	# Remover funções Lambda
+	@awslocal lambda list-functions --query "Functions[*].FunctionArn" --output text | xargs -I {} awslocal lambda delete-function --function-name {}
+	# Remover máquinas de estado do Step Functions
+	@awslocal stepfunctions list-state-machines --query "stateMachines[*].stateMachineArn" --output text | xargs -I {} awslocal stepfunctions delete-state-machine --state-machine-arn {}
+	# Remover filas SQS
+	@awslocal sqs list-queues --query "QueueUrls" --output text | xargs -I {} awslocal sqs delete-queue --queue-url {}
+	@echo "Todos os recursos foram destruídos no LocalStack."
+
+sam_setup_tables:
+	sam build
+	sam local invoke "ItauLambdaControle" -e events/aws_cli_setup_tables.json 
+sam_package:
+	pip install --platform manylinux2014_x86_64 --only-binary=:all: -t package -r requirements.txt
+	cp -R app/* package/
+	cd package/; echo "I'm in package/"; \
+	zip -r ../deployment_package.zip .
+sam_clear:
+	rm -rf package
+	rm -rf deployment_package.zip

@@ -1,17 +1,5 @@
 {
   "name": "lambda-controle-step-function",
   "roleArn": "arn:aws:iam::000000000000:role/DummyRole",
-  "definition": "{ \
-    \"Comment\": \"Exemplo de Step Function no LocalStack\", \
-    \"StartAt\": \"FirstStep\", \
-    \"States\": { \
-      \"FirstStep\": { \
-        \"Type\": \"Pass\", \
-        \"Next\": \"SecondStep\" \
-      }, \
-      \"SecondStep\": { \
-        \"Type\": \"Succeed\" \
-      } \
-    } \
-  }"
+  "definition": ""
 }
