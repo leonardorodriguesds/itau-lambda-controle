@@ -1,6 +1,4 @@
-annotated-types==0.7.0
-boto3==1.35.52
-botocore==1.35.52
-mysql-connector-python==9.1.0
+pydantic==2.9.2
+pydantic_core==2.23.4
 PyMySQL==1.1.1
-SQLAlchemy
+SQLAlchemy==2.0.36

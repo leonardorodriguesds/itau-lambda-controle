@@ -10,5 +10,5 @@ class TaskTable(Base):
     alias = Column(String(255), primary_key=True)
     params = Column(JSON)
     
-    table = relationship("Tables", back_populates="task_table")
-    task_executor = relationship("TaskExecutor", back_populates="task_table")
+    table = relationship("Tables", back_populates="task_table", foreign_keys=[table_id])
+    task_executor = relationship("TaskExecutor", back_populates="task_table", foreign_keys=[task_executor_id])

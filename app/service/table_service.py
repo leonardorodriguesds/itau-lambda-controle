@@ -1,91 +1,60 @@
+from datetime import datetime
+from typing import List
+from models.dto.table_dto import TableDTO
 from models.tables import Tables
-from models.task_executor import TaskExecutor
-from models.dependencies import Dependencies
-from models.partitions import Partitions
-from service.database import get_session
-from app.exceptions.table_insert_error import TableInsertError
-from app.models.dto.table_dto import TableDTO, PartitionDTO, DependencyDTO, TaskDTO
+from exceptions.table_insert_error import TableInsertError
+from repositories.table_repository import TableRepository
+from service.dependency_service import DependencyService
+from service.partition_service import PartitionService
+from service.task_executor_service import TaskExecutorService
 
-def save(table_dto: TableDTO, user: str):
-    if not table_dto:
-        return "Data parameter is required for save"
+class TableService:
+    def __init__(self, session):
+        self.session = session
+        self.table_repo = TableRepository(session)
+        self.dependency_service = DependencyService(session)
+        self.partition_service = PartitionService(session)
+        self.task_executor_service = TaskExecutorService(session)
 
-    session_generator = get_session()
-    session = next(session_generator)
-    
-    try:
-        task_executor_id = None
-        if table_dto.tasks:
-            for task in table_dto.tasks:
-                executor = session.query(TaskExecutor).filter(TaskExecutor.id == task.task_executor_id).first()
-                if not executor:
-                    executor = TaskExecutor(alias=task.alias, description=task.params.get("description", ""))
-                    session.add(executor)
-                    session.commit()
-                task_executor_id = executor.id
+    def save_multiple_tables(self, tables_dto: List[TableDTO], user: str):
+        """
+        Salva múltiplas tabelas em uma transação única. 
+        Apenas comita se todas as tabelas forem salvas com sucesso.
+        """
+        try:
+            for table_dto in tables_dto:
+                self.save_table(table_dto, user)
+            self.session.commit()  
+            return "All tables saved successfully."
+        except Exception as e:
+            self.session.rollback()  
+            raise TableInsertError(f"Error saving multiple tables: {str(e)}")
+
+    def save_table(self, table_dto: TableDTO, user: str):
+        if not table_dto:
+            raise TableInsertError("Table data is required.")
 
         if table_dto.id:
-            table = session.query(Tables).filter(Tables.id == table_dto.id).first()
+            table: Tables = self.table_repo.get_by_id(table_dto.id)
             if not table:
-                return f"Table with id {table_dto.id} not found."
-
+                raise TableInsertError(f"Table with id {table_dto.id} not found.")
             table.name = table_dto.name
             table.description = table_dto.description
-            table.requires_approval = table_dto.requires_approval
             table.last_modified_by = user
-            message = f"Table with id {table.id} updated successfully."
+            table.last_modified_at = datetime.now()
+            table.requires_approval = table_dto.requires_approval
+            self.table_repo.update(table)
         else:
             table = Tables(
                 name=table_dto.name,
                 description=table_dto.description,
-                requires_approval=table_dto.requires_approval,
                 created_by=user,
-                last_modified_by=user
+                created_at=datetime.now(),
+                requires_approval=table_dto.requires_approval
             )
-            session.add(table)
-            session.commit()
-            message = f"Table added successfully with table_id: {table.id}"
+            self.table_repo.save(table)
 
-        if table_dto.partitions:
-            existing_partitions = {p.name for p in session.query(Partitions).filter(Partitions.table_id == table.id).all()}
-            for partition_data in table_dto.partitions:
-                if partition_data.name not in existing_partitions:
-                    partition = Partitions(
-                        table_id=table.id,
-                        name=partition_data.name,
-                        type=partition_data.type,
-                        is_required=partition_data.is_required
-                    )
-                    session.add(partition)
+        self.partition_service.save_partitions(table.id, table_dto.partitions)
+        self.dependency_service.save_dependencies(table.id, table_dto.dependencies)
 
-        if table_dto.dependencies:
-            existing_dependencies = {d.dependency_id for d in session.query(Dependencies).filter(Dependencies.table_id == table.id).all()}
-            for dependency_data in table_dto.dependencies:
-                dependency_id = dependency_data.dependency_id
-                if dependency_id and dependency_id not in existing_dependencies:
-                    dependency = Dependencies(table_id=table.id, dependency_id=dependency_id)
-                    session.add(dependency)
-                elif not dependency_id:
-                    new_dependency_table = Tables(
-                        name=dependency_data.dependency_name,
-                        description=dependency_data.dependency_description,
-                        requires_approval=dependency_data.requires_approval,
-                        created_by=user,
-                        last_modified_by=user
-                    )
-                    session.add(new_dependency_table)
-                    session.commit()  
-
-                    dependency = Dependencies(table_id=table.id, dependency_id=new_dependency_table.id)
-                    session.add(dependency)
-
-        session.commit()
-        
-        return message
-
-    except Exception as e:
-        session.rollback()
-        raise TableInsertError(f"Error saving table: {str(e)}")
-
-    finally:
-        session_generator.close()
+        return f"Table '{table.name}' saved successfully."

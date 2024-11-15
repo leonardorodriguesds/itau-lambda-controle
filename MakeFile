@@ -1,6 +1,6 @@
 # Diretórios e arquivos
 SRC_DIR=app
-ZIP_FILE=$(SRC_DIR)/function.zip
+ZIP_FILE=function.zip
 LAMBDA_JSON=localstack/lambda.json
 SQS_JSON=localstack/sqs.json
 STEPFUNCTION_JSON=localstack/stepfunction.json
@@ -9,6 +9,11 @@ LAMBDA_NAME=lambda-controle
 BUILD_DIR=build
 LAYER_DIR=layer
 LAYER_ZIP=$(LAYER_DIR)/layer.zip
+
+initial_database:
+	docker stop lambdacontroleitau
+	docker rm lambdacontroleitau
+	docker-compose -f config/docker/docker-mysql.yml up -d
 
 # Função de criação do zip de todo o conteúdo da pasta src com dependências
 create_layer:
@@ -22,18 +27,21 @@ create_layer:
 # Função para criar o zip da Lambda sem dependências
 zip:
 	rm -rf $(BUILD_DIR)
-	mkdir -p $(BUILD_DIR)
-	cp -r $(SRC_DIR)/* $(BUILD_DIR)
-	cd $(BUILD_DIR) && zip -r ../$(ZIP_FILE) .
+	pip install --platform manylinux2014_x86_64 --only-binary=:all: -t $(BUILD_DIR) -r requirements.txt
+	cp -R $(SRC_DIR)/* $(BUILD_DIR)/
+	cd $(BUILD_DIR)/; echo "I'm in $(BUILD_DIR)/"; \
+	zip -r ../$(ZIP_FILE) .
+	rm -rf $(BUILD_DIR)
+	
 
 # Função para criar a Lambda no LocalStack
-create_lambda: zip create_layer
-	@awslocal lambda publish-layer-version --layer-name $(LAMBDA_NAME)-dependencies --zip-file fileb://$(LAYER_ZIP) 2>/dev/null
-	@echo "Camada publicada para $(LAMBDA_NAME)-dependencies"
+create_lambda: zip
+# 	@awslocal lambda publish-layer-version --layer-name $(LAMBDA_NAME)-dependencies --zip-file fileb://$(LAYER_ZIP) 2>/dev/null
+#	@echo "Camada publicada para $(LAMBDA_NAME)-dependencies"
 	@awslocal lambda create-function \
 		--cli-input-json file://$(LAMBDA_JSON) \
-		--zip-file fileb://$(ZIP_FILE) \
-		--layers $$(awslocal lambda list-layers --query "Layers[?LayerName=='$(LAMBDA_NAME)-dependencies'].LatestMatchingVersion.LayerVersionArn" --output text 2>/dev/null | grep '^arn:' | awk '{print $$1}') 2>/dev/null
+		--zip-file fileb://$(ZIP_FILE)
+	@rm -rf $(ZIP_FILE)
 
 # Função para limpar todos os arquivos e pastas criados
 clean:

@@ -1,34 +1,110 @@
 {
-    "Records": [
+    "event": "add_table",
+    "data": [
         {
-            "body": {
-                "event": "add_table",
-                "data": {
-                    "name": "tbjf001_op_pdz_prep",
-                    "description": "Tabela de operações preparadas do PDZ",
-                    "requires_approval": false,
-                    "partitions": [
-                        {
-                            "name": "ano_mes_referencia",
-                            "type": "int",
-                            "is_required": true
-                        },
-                        {
-                            "name": "versao_processamento",
-                            "type": "int",
-                            "is_required": true
-                        },
-                        {
-                            "name": "identificador_empresa",
-                            "type": "int",
-                            "is_required": true
-                        }
-                    ],
-                    "dependencies": [],
-                    "tasks": []
+            "name": "tbjf001_op_pdz_prep",
+            "description": "Tabela de operações preparadas do PDZ",
+            "requires_approval": false,
+            "partitions": [
+                {
+                    "name": "ano_mes_referencia",
+                    "type": "int",
+                    "is_required": true
                 },
-                "user": "lrcxpnu"
-            }
+                {
+                    "name": "versao_processamento",
+                    "type": "int",
+                    "is_required": true
+                },
+                {
+                    "name": "identificador_empresa",
+                    "type": "int",
+                    "is_required": true
+                }
+            ],
+            "dependencies": [],
+            "tasks": []
+        },
+        {
+            "name": "tbjf002_op_plz_prep",
+            "description": "Tabela de operações preparadas do PLZ",
+            "requires_approval": false,
+            "partitions": [
+                {
+                    "name": "ano_mes_referencia",
+                    "type": "int",
+                    "is_required": true
+                },
+                {
+                    "name": "versao_processamento",
+                    "type": "int",
+                    "is_required": true
+                },
+                {
+                    "name": "identificador_empresa",
+                    "type": "int",
+                    "is_required": true
+                }
+            ],
+            "dependencies": [],
+            "tasks": []
+        },
+        {
+            "name": "tb_modalidade_prep",
+            "description": "Tabela de modalidades",
+            "requires_approval": false,
+            "partitions": [
+                {
+                    "name": "ano_mes_referencia",
+                    "type": "int",
+                    "is_required": true
+                },
+                {
+                    "name": "versao_processamento",
+                    "type": "int",
+                    "is_required": true
+                }
+            ],
+            "dependencies": [],
+            "tasks": []
+        },
+        {
+            "name": "tb_op_enriquecido",
+            "description": "Tabela de operações preparadas do PLZ",
+            "requires_approval": true,
+            "partitions": [
+                {
+                    "name": "ano_mes_referencia",
+                    "type": "int",
+                    "is_required": true
+                },
+                {
+                    "name": "versao_processamento",
+                    "type": "int",
+                    "is_required": true
+                },
+                {
+                    "name": "identificador_empresa",
+                    "type": "int",
+                    "is_required": true
+                }
+            ],
+            "dependencies": [
+                {
+                    "dependency_name": "tbjf001_op_pdz_prep",
+                    "is_required": true
+                },
+                {
+                    "dependency_name": "tbjf002_op_plz_prep",
+                    "is_required": true
+                },
+                {
+                    "dependency_name": "tb_modalidade_prep",
+                    "is_required": false
+                }
+            ],
+            "tasks": []
         }
-    ]
+    ],   
+    "user": "lrcxpnu"
 }

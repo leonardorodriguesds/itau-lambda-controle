@@ -5,3 +5,7 @@ layer/
 package/
 *.env
 .env
+__pycache__/
+outputfile.txt
+.vscode/launch.json
+outputfile.txt

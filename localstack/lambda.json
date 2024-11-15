@@ -1,6 +1,6 @@
 {
     "FunctionName": "lambda-controle",
-    "Runtime": "python3.8",
+    "Runtime": "python3.10",
     "Role": "arn:aws:iam::000000000000:role/DummyRole",
     "Handler": "lambda_function.lambda_handler",
     "Code": {
