@@ -11,17 +11,16 @@ from exceptions.table_insert_error import TableInsertError
 from repositories.table_partition_exec_repository import TablePartitionExecRepository
 from repositories.table_repository import TableRepository
 
-logger = Logger(__name__)
-
 class TablePartitionExecService:
-    def __init__(self, session: Session):
+    def __init__(self, session, logger: Logger):
         self.session = session
+        self.logger = logger
         self.repository = TablePartitionExecRepository(session)
         self.table_repo = TableRepository(session)
         self.table_execution_repository = TableExecutionRepository(session)
         
     def trigger_tables(self, dto: TablePartitionExecDTO):
-        logger.debug(f"[TablePartitionExecService] Triggering tables for: {dto}")
+        self.logger.debug(f"[TablePartitionExecService] Triggering tables for: {dto}")
         tables: List[Tables] = self.table_repo.get_by_dependecy(dto.table_id)
         
         for table in tables:
@@ -52,6 +51,7 @@ class TablePartitionExecService:
         3. Todas as partições fornecidas devem estar associadas à tabela.
         4. Atualiza automaticamente a versão mais recente para cada conjunto `table x partition`.
         """
+        self.logger.debug(f"[TablePartitionExecService] Registering partitions exec for: {dto}")
         try:
             table = None
             if dto.table_id:
@@ -113,7 +113,7 @@ class TablePartitionExecService:
                     value=partition.value,
                 )
                 if existing_entry:
-                    logger.info(
+                    self.logger.info(
                         f"Entrada já existente para table_id={table.id}, "
                         f"partition_id={partition.partition_id}, value={partition.value}."
                     )

@@ -1,4 +1,5 @@
 from datetime import datetime
+from logging import Logger
 from typing import List
 from models.dto.table_dto import TableDTO
 from models.tables import Tables
@@ -9,8 +10,9 @@ from service.partition_service import PartitionService
 from service.task_executor_service import TaskExecutorService
 
 class TableService:
-    def __init__(self, session):
+    def __init__(self, session, logger: Logger):
         self.session = session
+        self.logger = logger
         self.table_repo = TableRepository(session)
         self.dependency_service = DependencyService(session)
         self.partition_service = PartitionService(session)

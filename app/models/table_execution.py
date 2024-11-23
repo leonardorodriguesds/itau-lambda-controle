@@ -13,3 +13,4 @@ class TableExecution(Base):
     source = Column(String(255), nullable=False)
     
     table = relationship("Tables", back_populates="table_executions")
+    table_partition_execs = relationship("TablePartitionExec", back_populates="execution")

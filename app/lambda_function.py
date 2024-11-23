@@ -15,8 +15,8 @@ def lambda_handler(event, context):
     logger.info(f"Received event: {event}")
     session_generator = get_session()
     session = next(session_generator)
-    table_service = TableService(session)
-    table_partition_exec_service = TablePartitionExecService(session)
+    table_service = TableService(session, logger)
+    table_partition_exec_service = TablePartitionExecService(session, logger)
 
     try:
         event_type = event.get("event")
@@ -95,8 +95,15 @@ def main():
         required=True,
         help="Caminho para o arquivo JSON de payload para a função Lambda"
     )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Ativa o modo verboso para exibir informações detalhadas"
+    )
 
     args = parser.parse_args()
+    
+    logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
     try:
         with open(args.file, "r") as file:
