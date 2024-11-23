@@ -1,4 +1,4 @@
-from sqlalchemy import UUID, Column, Integer, String, Boolean, ForeignKey, DateTime, UniqueConstraint, CheckConstraint
+from sqlalchemy import UUID, Column, Integer, String, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .base import Base
@@ -21,11 +21,3 @@ class TablePartitionExec(Base):
     __mapper_args__ = {
         "primary_key": [table_id, partition_id, value]
     }
-
-    __table_args__ = (
-        UniqueConstraint(
-            'table_id', 'partition_id', 'tag_latest',
-            name='unique_table_partition_latest_tag'
-        )
-    )
-
