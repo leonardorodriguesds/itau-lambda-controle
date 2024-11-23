@@ -1,8 +1,8 @@
 from sqlalchemy import Boolean, Column, Integer, ForeignKey
 from sqlalchemy.orm import relationship
-from .base import Base
+from .base import AbstractBase
 
-class Dependencies(Base):
+class Dependencies(AbstractBase):
     __tablename__ = 'dependencies'
     
     id = Column(Integer, primary_key=True)

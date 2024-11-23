@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, ForeignKey, Enum, DateTime, String
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from .base import Base
+from .base import AbstractBase
 
-class ApprovalStatus(Base):
+class ApprovalStatus(AbstractBase):
     __tablename__ = 'approval_status'
     
     id = Column(Integer, primary_key=True)

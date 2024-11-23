@@ -1,8 +1,8 @@
 from sqlalchemy import Column, Integer, String, JSON, ForeignKey
 from sqlalchemy.orm import relationship
-from .base import Base
+from .base import AbstractBase
 
-class TaskTable(Base):
+class TaskTable(AbstractBase):
     __tablename__ = 'task_table'
     
     table_id = Column(Integer, ForeignKey('tables.id'), primary_key=True)

@@ -1,6 +1,7 @@
 from datetime import datetime
 from logging import Logger
-from typing import List
+from typing import List, Optional
+from service.table_execution_service import TableExecutionService
 from models.dto.table_dto import TableDTO
 from models.tables import Tables
 from exceptions.table_insert_error import TableInsertError
@@ -13,10 +14,11 @@ class TableService:
     def __init__(self, session, logger: Logger):
         self.session = session
         self.logger = logger
-        self.table_repo = TableRepository(session)
-        self.dependency_service = DependencyService(session)
-        self.partition_service = PartitionService(session)
-        self.task_executor_service = TaskExecutorService(session)
+        self.table_repository = TableRepository(session, logger)
+        self.dependency_service = DependencyService(session, logger)
+        self.partition_service = PartitionService(session, logger)
+        self.task_executor_service = TaskExecutorService(session, logger)
+        self.table_execution_service = TableExecutionService(session, logger)
 
     def save_multiple_tables(self, tables_dto: List[TableDTO], user: str):
         """
@@ -31,13 +33,27 @@ class TableService:
         except Exception as e:
             self.session.rollback()  
             raise TableInsertError(f"Error saving multiple tables: {str(e)}")
+        
+    def find(self, table_id: Optional[str] = None, table_name: Optional[str] = None):
+        if table_id:
+            table = self.table_repository.get_by_id(table_id)
+            if not table:
+                raise TableInsertError(f"Table with id [{table_id}] not found.")
+            return table
+        elif table_name:
+            table = self.table_repository.get_by_name(table_name)
+            if not table:
+                raise TableInsertError(f"Table with name {table_name} not found.")
+            return table
+        else:
+            raise TableInsertError("Table id or name is required.")
 
     def save_table(self, table_dto: TableDTO, user: str):
         if not table_dto:
             raise TableInsertError("Table data is required.")
 
         if table_dto.id:
-            table: Tables = self.table_repo.get_by_id(table_dto.id)
+            table: Tables = self.table_repository.get_by_id(table_dto.id)
             if not table:
                 raise TableInsertError(f"Table with id {table_dto.id} not found.")
             table.name = table_dto.name
@@ -45,7 +61,7 @@ class TableService:
             table.last_modified_by = user
             table.last_modified_at = datetime.now()
             table.requires_approval = table_dto.requires_approval
-            self.table_repo.update(table)
+            self.table_repository.update(table)
         else:
             table = Tables(
                 name=table_dto.name,
@@ -54,9 +70,18 @@ class TableService:
                 created_at=datetime.now(),
                 requires_approval=table_dto.requires_approval
             )
-            self.table_repo.save(table)
+            self.table_repository.save(table)
 
         self.partition_service.save_partitions(table.id, table_dto.partitions)
         self.dependency_service.save_dependencies(table.id, table_dto.dependencies)
 
         return f"Table '{table.name}' saved successfully."
+    
+    def get_latest(self, table_id: Optional[str], table_name: Optional[str]):
+        table: Tables = self.find(table_id, table_name)
+        
+        return self.table_execution_service.get_latest_execution(table.id)
+        
+    def find_by_dependency(self, table_id: int):
+        self.logger.debug(f"[TableService] Finding tables by dependency: [{table_id}]")
+        return self.table_repository.get_by_dependecy(table_id)

@@ -29,7 +29,7 @@ def set_charset(db):
 def get_session():
     db = SessionLocal()
     try:
-        set_charset(db)
+        # set_charset(db)
         yield db
     finally:
         db.close()

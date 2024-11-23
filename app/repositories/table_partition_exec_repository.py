@@ -1,9 +1,11 @@
+from logging import Logger
 from sqlalchemy.orm import Session
 from models.table_partition_exec import TablePartitionExec
 
 class TablePartitionExecRepository:
-    def __init__(self, session: Session):
+    def __init__(self, session, logger: Logger):
         self.session = session
+        self.logger = logger
 
     def save(self, exec_entry: TablePartitionExec):
         """
@@ -43,6 +45,10 @@ class TablePartitionExecRepository:
             partition_id=partition_id,
             value=value
         ).first()
+        
+    def get_by_execution(self, execution_id: int) -> TablePartitionExec:
+        self.logger.debug(f"[TablePartitionExecRepository] Getting partitions exec for execution: [{execution_id}]")
+        return self.session.query(TablePartitionExec).filter_by(execution_id=execution_id).all()
 
 
 

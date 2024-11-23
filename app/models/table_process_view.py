@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, JSON, Enum, DateTime
-from .base import Base
+from .base import AbstractBase
 
-class TableProcessView(Base):
+class TableProcessView(AbstractBase):
     __tablename__ = 'table_process_view'
     __table_args__ = {'extend_existing': True}  
 

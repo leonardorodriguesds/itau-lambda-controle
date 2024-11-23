@@ -1,9 +1,9 @@
-from sqlalchemy import UUID, Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import BINARY, UUID, Column, Integer, String, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from .base import Base
+from .base import AbstractBase
 
-class TablePartitionExec(Base):
+class TablePartitionExec(AbstractBase):
     __tablename__ = 'table_partition_exec'
     
     table_id = Column(Integer, ForeignKey('tables.id'), nullable=False)
@@ -12,12 +12,12 @@ class TablePartitionExec(Base):
     execution_date = Column(DateTime, nullable=False, default=datetime.utcnow)
     deletion_date = Column(DateTime, nullable=True)
     deleted_by_user = Column(String(255), nullable=True)
-    execution_id = Column(UUID(as_uuid=True), ForeignKey('table_execution.id'), nullable=True)
+    execution_id = Column(Integer, ForeignKey('table_execution.id'), nullable=False)
     
     table = relationship("Tables", back_populates="table_partition_execs")
     partition = relationship("Partitions", back_populates="table_partition_execs")
     execution = relationship("TableExecution", back_populates="table_partition_execs") 
     
     __mapper_args__ = {
-        "primary_key": [table_id, partition_id, value]
+        "primary_key": [table_id, partition_id, value, execution_id]
     }

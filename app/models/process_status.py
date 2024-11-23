@@ -1,9 +1,9 @@
 from sqlalchemy import Column, Integer, ForeignKey, JSON, Enum, DateTime, Text
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from .base import Base
+from .base import AbstractBase
 
-class ProcessStatus(Base):
+class ProcessStatus(AbstractBase):
     __tablename__ = 'process_status'
     
     id = Column(Integer, primary_key=True)

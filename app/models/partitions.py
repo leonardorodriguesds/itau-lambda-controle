@@ -1,8 +1,8 @@
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey
 from sqlalchemy.orm import relationship
-from .base import Base
+from .base import AbstractBase
 
-class Partitions(Base):
+class Partitions(AbstractBase):
     __tablename__ = 'partitions'
     
     id = Column(Integer, primary_key=True)

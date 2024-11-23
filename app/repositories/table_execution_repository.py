@@ -4,15 +4,23 @@ import logging
 
 from models.table_execution import TableExecution
 
-logger = logging.getLogger(__name__)
-
 class TableExecutionRepository:
-    def __init__(self, session: Session):
-        """
-        Inicializa o repositório com uma sessão do SQLAlchemy.
-        :param session: Sessão do SQLAlchemy.
-        """
+    def __init__(self, session, logger: logging.Logger):
         self.session = session
+        self.logger = logger
+        
+    def get_latest_execution(self, table_id: int):
+        """
+        Retorna a última execução de uma tabela pelo ID.
+        :param table_id: ID da tabela.
+        :return: Instância de TableExecution ou None.
+        """
+        try:
+            self.logger.debug(f"[TableExecutionRepository] get last execution for table [{table_id}]")
+            return self.session.query(TableExecution).filter_by(table_id=table_id).order_by(TableExecution.date_time.desc()).first()
+        except SQLAlchemyError as e:
+            self.logger.error(f"Erro ao buscar última execução da tabela [{table_id}]: {str(e)}")
+            raise
 
     def create_execution(self, table_id: int, source: str):
         """
@@ -28,11 +36,11 @@ class TableExecutionRepository:
             )
             self.session.add(new_execution)
             self.session.commit()
-            logger.info(f"Nova execução criada: {new_execution.id}")
+            self.logger.info(f"Nova execução criada: {new_execution.id}")
             return new_execution
         except SQLAlchemyError as e:
             self.session.rollback()
-            logger.error(f"Erro ao criar execução: {str(e)}")
+            self.logger.error(f"Erro ao criar execução: {str(e)}")
             raise
 
     def get_execution_by_id(self, execution_id):
@@ -44,7 +52,7 @@ class TableExecutionRepository:
         try:
             return self.session.query(TableExecution).filter_by(id=execution_id).one_or_none()
         except SQLAlchemyError as e:
-            logger.error(f"Erro ao buscar execução pelo ID {execution_id}: {str(e)}")
+            self.logger.error(f"Erro ao buscar execução pelo ID {execution_id}: {str(e)}")
             raise
 
     def get_executions_by_table(self, table_id: int):
@@ -56,7 +64,7 @@ class TableExecutionRepository:
         try:
             return self.session.query(TableExecution).filter_by(table_id=table_id).all()
         except SQLAlchemyError as e:
-            logger.error(f"Erro ao buscar execuções pela tabela {table_id}: {str(e)}")
+            self.logger.error(f"Erro ao buscar execuções pela tabela {table_id}: {str(e)}")
             raise
 
     def delete_execution(self, execution_id):
@@ -69,10 +77,10 @@ class TableExecutionRepository:
             if execution:
                 self.session.delete(execution)
                 self.session.commit()
-                logger.info(f"Execução {execution_id} excluída com sucesso.")
+                self.logger.info(f"Execução {execution_id} excluída com sucesso.")
             else:
-                logger.warning(f"Execução {execution_id} não encontrada para exclusão.")
+                self.logger.warning(f"Execução {execution_id} não encontrada para exclusão.")
         except SQLAlchemyError as e:
             self.session.rollback()
-            logger.error(f"Erro ao excluir execução {execution_id}: {str(e)}")
+            self.logger.error(f"Erro ao excluir execução {execution_id}: {str(e)}")
             raise

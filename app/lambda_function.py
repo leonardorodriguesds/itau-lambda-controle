@@ -10,6 +10,12 @@ from exceptions.table_insert_error import TableInsertError
 from service.table_service import TableService
 
 logger = logging.getLogger()
+logger.setLevel(logging.INFO) 
+
+handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 def lambda_handler(event, context):
     logger.info(f"Received event: {event}")

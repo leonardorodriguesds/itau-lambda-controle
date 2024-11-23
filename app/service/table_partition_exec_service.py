@@ -2,30 +2,48 @@ from logging import Logger
 from typing import List
 from sqlalchemy.orm import Session
 from datetime import datetime
-from repositories.table_execution_repository import TableExecutionRepository
+from models.partitions import Partitions
+from service.task_service import TaskService
+from service.partition_service import PartitionService
+from service.table_service import TableService
+from service.table_execution_service import TableExecutionService
 from models.table_execution import TableExecution
 from models.tables import Tables
 from models.table_partition_exec import TablePartitionExec
 from models.dto.table_partition_exec_dto import PartitionDTO, TablePartitionExecDTO
 from exceptions.table_insert_error import TableInsertError
 from repositories.table_partition_exec_repository import TablePartitionExecRepository
-from repositories.table_repository import TableRepository
 
 class TablePartitionExecService:
     def __init__(self, session, logger: Logger):
         self.session = session
         self.logger = logger
-        self.repository = TablePartitionExecRepository(session)
-        self.table_repo = TableRepository(session)
-        self.table_execution_repository = TableExecutionRepository(session)
+        self.repository = TablePartitionExecRepository(session, logger)
+        self.table_service = TableService(session, logger)
+        self.table_execution_repository = TableExecutionService(session, logger)
+        self.partition_service = PartitionService(session, logger)
+        self.task_service = TaskService(session, logger)
         
-    def trigger_tables(self, dto: TablePartitionExecDTO):
-        self.logger.debug(f"[TablePartitionExecService] Triggering tables for: {dto}")
-        tables: List[Tables] = self.table_repo.get_by_dependecy(dto.table_id)
+    def trigger_tables(self, table_id: int):
+        self.logger.debug(f"[TablePartitionExecService] Triggering tables for: [{table_id}]")
+        tables: List[Tables] = self.table_service.find_by_dependency(table_id)
         
         for table in tables:
-            for task in table.task_table:
-                pass
+            dependencies_latest = {
+                d.id: self.table_execution_repository.get_latest_execution(d.id)
+                for d in table.dependencies
+            }
+            
+            dependencies_partitions_strings = {
+                d.dependency_table.name: " AND ".join([f"{p.partition.name}=={p.value}" for p in self.repository.get_by_execution(dependencies_latest[d.id].id)])
+                for d in table.dependencies if dependencies_latest.get(d.id)
+            }
+            
+            self.logger.debug(f"[TablePartitionExecService] Dependencies partitions strings: {dependencies_partitions_strings}")
+                        
+            partitions: List[Partitions] = table.partitions
+            
+            
         
     def register_multiple_events(self, dtos: list[TablePartitionExecDTO]):
         """
@@ -55,9 +73,9 @@ class TablePartitionExecService:
         try:
             table = None
             if dto.table_id:
-                table = self.table_repo.get_by_id(dto.table_id)
+                table = self.table_service.find(table_id=dto.table_id)
             elif dto.table_name:
-                table = self.table_repo.get_by_name(dto.table_name)
+                table = self.table_service.find(table_name=dto.table_name)
 
             if not table:
                 raise TableInsertError(
@@ -107,34 +125,17 @@ class TablePartitionExecService:
             new_execution = self.table_execution_repository.create_execution(table.id, dto.source)
 
             for partition in resolved_partitions:
-                existing_entry = self.repository.get_by_table_partition_and_value(
-                    table_id=table.id,
-                    partition_id=partition.partition_id,
-                    value=partition.value,
-                )
-                if existing_entry:
-                    self.logger.info(
-                        f"Entrada já existente para table_id={table.id}, "
-                        f"partition_id={partition.partition_id}, value={partition.value}."
-                    )
-                    continue  
-
-                self.session.query(TablePartitionExec).filter_by(
-                    table_id=table.id, partition_id=partition.partition_id
-                ).update({"tag_latest": False})
-
                 new_entry = TablePartitionExec(
                     table_id=table.id,
                     partition_id=partition.partition_id,
                     value=partition.value,
                     execution_date=datetime.utcnow(),
-                    tag_latest=True,
                     execution_id=new_execution.id  
-            )
-            self.repository.save(new_entry)
+                )
+                self.repository.save(new_entry)
 
             self.repository.commit()
-            self.trigger_tables(dto)
+            self.trigger_tables(new_execution.table_id)
             return {"message": "Table partition execution entries registered successfully."}
 
         except Exception as e:

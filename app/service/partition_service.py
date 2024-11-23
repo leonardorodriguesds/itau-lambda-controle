@@ -1,13 +1,17 @@
+from logging import Logger
 from typing import List
 from models.partitions import Partitions
 from models.dto.table_dto import PartitionDTO
 from repositories.partition_repository import PartitionRepository
 
 class PartitionService:
-    def __init__(self, session):
-        self.partition_repo = PartitionRepository(session)
+    def __init__(self, session, logger: Logger):
+        self.session = session
+        self.logger = logger
+        self.partition_repo = PartitionRepository(session, logger)
 
     def save_partitions(self, table_id: int, partitions_dto: List[PartitionDTO]):
+        self.logger.debug(f"[PartitionService] Saving partitions for table [{table_id}]")
         existing_partitions = {
             p.name for p in self.partition_repo.get_by_table_id(table_id)
         }
