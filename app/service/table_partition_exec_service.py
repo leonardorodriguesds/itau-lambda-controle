@@ -1,16 +1,32 @@
+from logging import Logger
+from typing import List
 from sqlalchemy.orm import Session
 from datetime import datetime
+from repositories.table_execution_repository import TableExecutionRepository
+from models.table_execution import TableExecution
+from models.tables import Tables
 from models.table_partition_exec import TablePartitionExec
 from models.dto.table_partition_exec_dto import PartitionDTO, TablePartitionExecDTO
 from exceptions.table_insert_error import TableInsertError
 from repositories.table_partition_exec_repository import TablePartitionExecRepository
 from repositories.table_repository import TableRepository
 
+logger = Logger(__name__)
+
 class TablePartitionExecService:
     def __init__(self, session: Session):
         self.session = session
         self.repository = TablePartitionExecRepository(session)
         self.table_repo = TableRepository(session)
+        self.table_execution_repository = TableExecutionRepository(session)
+        
+    def trigger_tables(self, dto: TablePartitionExecDTO):
+        logger.debug(f"[TablePartitionExecService] Triggering tables for: {dto}")
+        tables: List[Tables] = self.table_repo.get_by_dependecy(dto.table_id)
+        
+        for table in tables:
+            for task in table.task_table:
+                pass
         
     def register_multiple_events(self, dtos: list[TablePartitionExecDTO]):
         """
@@ -34,6 +50,7 @@ class TablePartitionExecService:
         1. Todas as partições obrigatórias devem estar presentes.
         2. Pode conter qualquer conjunto de partições opcionais.
         3. Todas as partições fornecidas devem estar associadas à tabela.
+        4. Atualiza automaticamente a versão mais recente para cada conjunto `table x partition`.
         """
         try:
             table = None
@@ -87,14 +104,24 @@ class TablePartitionExecService:
                     f"As seguintes partições obrigatórias estão faltando: {', '.join(missing_names)}"
                 )
 
+            new_execution = self.table_execution_repository.create_execution(table.id, dto.source)
+
             for partition in resolved_partitions:
-                latest_entry = self.repository.get_latest_by_table_partition(
-                    table.id, partition.partition_id
+                existing_entry = self.repository.get_by_table_partition_and_value(
+                    table_id=table.id,
+                    partition_id=partition.partition_id,
+                    value=partition.value,
                 )
-                if latest_entry:
-                    latest_entry.tag_latest = False
-                    latest_entry.deletion_date = datetime.utcnow()
-                    latest_entry.deleted_by_user = dto.user
+                if existing_entry:
+                    logger.info(
+                        f"Entrada já existente para table_id={table.id}, "
+                        f"partition_id={partition.partition_id}, value={partition.value}."
+                    )
+                    continue  
+
+                self.session.query(TablePartitionExec).filter_by(
+                    table_id=table.id, partition_id=partition.partition_id
+                ).update({"tag_latest": False})
 
                 new_entry = TablePartitionExec(
                     table_id=table.id,
@@ -102,12 +129,15 @@ class TablePartitionExecService:
                     value=partition.value,
                     execution_date=datetime.utcnow(),
                     tag_latest=True,
-                )
-                self.repository.save(new_entry)
+                    execution_id=new_execution.id  
+            )
+            self.repository.save(new_entry)
 
             self.repository.commit()
+            self.trigger_tables(dto)
             return {"message": "Table partition execution entries registered successfully."}
 
         except Exception as e:
             self.repository.rollback()
             raise TableInsertError(f"Erro ao registrar execuções de partições: {str(e)}")
+

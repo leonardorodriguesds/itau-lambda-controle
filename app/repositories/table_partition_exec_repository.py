@@ -36,3 +36,13 @@ class TablePartitionExecRepository:
             )
             .first()
         )
+
+    def get_by_table_partition_and_value(self, table_id: int, partition_id: int, value: str):
+        return self.session.query(TablePartitionExec).filter_by(
+            table_id=table_id,
+            partition_id=partition_id,
+            value=value
+        ).first()
+
+
+

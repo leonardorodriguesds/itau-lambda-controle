@@ -10,6 +10,14 @@ CREATE TABLE tables (
     last_modified_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+CREATE TABLE table_execution (
+    id BINARY(16) NOT NULL PRIMARY KEY, 
+    table_id INT NOT NULL,
+    date_time DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    source VARCHAR(255) NOT NULL,
+    CONSTRAINT fk_table_execution_table FOREIGN KEY (table_id) REFERENCES tables (id) ON DELETE CASCADE
+) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- Criação da tabela partitions
 CREATE TABLE partitions (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -77,17 +85,17 @@ CREATE TABLE table_partition_exec (
     partition_id INT NOT NULL,
     value VARCHAR(255) NOT NULL,
     execution_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    tag_latest BOOLEAN NOT NULL DEFAULT FALSE,
+    execution_id BINARY(16), -- FK para a tabela table_execution
     deletion_date TIMESTAMP NULL,
     deleted_by_user VARCHAR(255) NULL,
     PRIMARY KEY (table_id, partition_id, value),
     CONSTRAINT fk_table FOREIGN KEY (table_id) REFERENCES tables (id) ON DELETE CASCADE,
     CONSTRAINT fk_partition FOREIGN KEY (partition_id) REFERENCES partitions (id) ON DELETE CASCADE,
-    CONSTRAINT unique_latest_tag UNIQUE (table_id, partition_id, tag_latest)
+    CONSTRAINT fk_execution FOREIGN KEY (execution_id) REFERENCES table_execution (id) ON DELETE SET NULL
 ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Criação da visão table_process_view
-CREATE VIEW table_process_view AS
+CREATE OR REPLACE VIEW table_process_view AS
 SELECT
     t.name AS table_name,
     t.description AS table_description,
@@ -98,7 +106,10 @@ SELECT
     ps.execution_start_time AS execution_time,
     ps.execution_end_time AS completion_time,
     ps.execution_logs AS execution_logs,
-    a.reviewed_at AS approval_reviewed_at
+    a.reviewed_at AS approval_reviewed_at,
+    e.id AS execution_id, -- Adiciona o ID da execução
+    e.date_time AS execution_date_time,
+    e.source AS execution_source
 FROM
     tables t
 LEFT JOIN
@@ -113,5 +124,7 @@ LEFT JOIN
     task_table tt ON t.id = tt.table_id
 LEFT JOIN
     task_executor te ON tt.task_executor_id = te.id
+LEFT JOIN
+    table_execution e ON t.id = e.table_id -- Associa a execução
 ORDER BY
-    t.name, ps.last_updated;
+    t.name, e.date_time DESC; -- Ordena por nome da tabela e data da execução

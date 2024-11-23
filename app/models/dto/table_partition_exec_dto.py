@@ -11,3 +11,4 @@ class TablePartitionExecDTO(BaseModel):
     table_name: Optional[str] = Field(None, description="Nome da tabela. Opcional se `table_id` for fornecido.")
     partitions: List[PartitionDTO] = Field(..., description="Lista de partições e valores.")
     user: str = Field(..., max_length=255, description="Usuário que executou.")
+    source: str = Field(..., max_length=255, description="Origem da execução.")

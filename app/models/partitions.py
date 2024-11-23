@@ -11,4 +11,6 @@ class Partitions(Base):
     type = Column(String(50), nullable=False)
     is_required = Column(Boolean, nullable=False)
     
-    table = relationship("Tables", back_populates="partitions")
+    table = relationship("Tables", back_populates="partitions")    
+    table_partition_execs = relationship("TablePartitionExec", back_populates="partition")
+
