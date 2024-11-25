@@ -1,0 +1,1 @@
+STATIC_SCHEDULE_PENDENT = 'pendent'

@@ -124,20 +124,42 @@ def upgrade() -> None:
         mysql_engine='InnoDB'
     )
     op.create_table('task_table',
+        sa.Column('id', mysql.INTEGER(), autoincrement=True, nullable=False),
         sa.Column('table_id', mysql.INTEGER(), autoincrement=False, nullable=False),
         sa.Column('task_executor_id', mysql.INTEGER(), autoincrement=False, nullable=False),
         sa.Column('alias', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=False),
         sa.Column('params', mysql.JSON(), nullable=True),
         sa.Column('date_deleted', mysql.DATETIME(), nullable=True),
-        sa.Column('deleted_by', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=True),  
+        sa.Column('deleted_by', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=True),
+        sa.Column('debounce_seconds', mysql.INTEGER(), nullable=False, server_default='10'),  
         sa.Column('tenant_id', mysql.INTEGER(), nullable=False, server_default='1'),
         sa.ForeignKeyConstraint(['table_id'], ['tables.id'], name='task_table_ibfk_1'),
         sa.ForeignKeyConstraint(['task_executor_id'], ['task_executor.id'], name='task_table_ibfk_2'),
-        sa.PrimaryKeyConstraint('table_id', 'task_executor_id', 'alias'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('table_id', 'task_executor_id', 'alias'),
         mysql_collate='utf8mb4_general_ci',
         mysql_default_charset='utf8mb4',
         mysql_engine='InnoDB'
     )
+    op.create_table(
+        'task_schedule',
+        sa.Column('id', mysql.INTEGER(), autoincrement=True, nullable=False),
+        sa.Column('task_id', mysql.INTEGER(), autoincrement=False, nullable=False),
+        sa.Column('last_event_time', mysql.DATETIME(), nullable=False),
+        sa.Column('scheduled_execution_time', mysql.DATETIME(), nullable=True),
+        sa.Column('status', mysql.VARCHAR(collation='utf8mb4_general_ci', length=50), nullable=False, server_default='pending'),
+        sa.Column('executed', mysql.TINYINT(display_width=1), nullable=False, server_default='0'),
+        sa.Column('date_deleted', mysql.DATETIME(), nullable=True),
+        sa.Column('tenant_id', mysql.INTEGER(), nullable=False, server_default='1'),
+        sa.Column('event_bridge_id', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=False),
+        sa.ForeignKeyConstraint(['task_id'], ['task_table.id'], name='task_schedule_ibfk_1'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('task_id', 'scheduled_execution_time'),
+        mysql_collate='utf8mb4_general_ci',
+        mysql_default_charset='utf8mb4',
+        mysql_engine='InnoDB'
+    )
+    
     op.create_table('approval_status',
         sa.Column('id', mysql.INTEGER(), autoincrement=True, nullable=False),
         sa.Column('table_id', mysql.INTEGER(), autoincrement=False, nullable=False),

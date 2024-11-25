@@ -2,6 +2,7 @@ import json
 import logging
 import argparse
 from pydantic import ValidationError
+from service.task_schedule_service import TaskScheduleService
 from models.dto.table_partition_exec_dto import TablePartitionExecDTO
 from service.table_partition_exec_service import TablePartitionExecService
 from service.database import get_session
@@ -23,6 +24,8 @@ def lambda_handler(event, context):
     session = next(session_generator)
     table_service = TableService(session, logger)
     table_partition_exec_service = TablePartitionExecService(session, logger)
+    task_schedule_servide = TaskScheduleService(session, logger)
+    task_schedule_servide.start_schedule()
 
     try:
         event_type = event.get("event")
