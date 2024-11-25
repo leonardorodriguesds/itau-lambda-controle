@@ -20,7 +20,6 @@ class Tables(AbstractBase):
     partitions = relationship("Partitions", back_populates="table")
     dependencies = relationship("Dependencies", back_populates="table", foreign_keys="[Dependencies.table_id]")
     dependent_tables = relationship("Dependencies", foreign_keys="[Dependencies.dependency_id]", back_populates="dependency_table")
-    approval_status = relationship("ApprovalStatus", back_populates="table")
     task_table = relationship("TaskTable", back_populates="table", foreign_keys="[TaskTable.table_id]")
     table_partition_execs = relationship("TablePartitionExec", back_populates="table")
     table_executions = relationship("TableExecution", back_populates="table")

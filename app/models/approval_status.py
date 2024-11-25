@@ -7,10 +7,10 @@ class ApprovalStatus(AbstractBase):
     __tablename__ = 'approval_status'
     
     id = Column(Integer, primary_key=True)
-    table_id = Column(Integer, ForeignKey('tables.id'), nullable=False)
+    task_table_id = Column(Integer, ForeignKey('task_table.id'), nullable=False)
     status = Column(Enum('PENDING', 'APPROVED', 'REJECTED', name="approval_status_enum"), default='PENDING')
     requested_at = Column(DateTime, default=datetime.utcnow)
     reviewed_at = Column(DateTime, nullable=True)
     approver_name = Column(String(255), nullable=True) 
     
-    table = relationship("Tables", back_populates="approval_status")
+    task = relationship("TaskTable", back_populates="approval_status")

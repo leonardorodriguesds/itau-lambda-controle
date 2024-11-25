@@ -2,7 +2,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 
-from models.base import AbstractBase
+from .base import AbstractBase
 
 class TaskSchedule(AbstractBase):
     __tablename__ = 'task_schedule'
@@ -13,6 +13,8 @@ class TaskSchedule(AbstractBase):
     scheduled_execution_time = Column(DateTime, nullable=True)
     status = Column(String(50), default="pending")  
     executed = Column(Boolean, default=False)  
-    event_bridge_id = Column(String(255), nullable=False)
-
+    table_execution_id = Column(Integer, ForeignKey('table_execution.id'), nullable=False)
+    unique_alias = Column(String(350), nullable=False)
+    
     task_table = relationship("TaskTable", back_populates="schedules", foreign_keys=[task_id])
+    table_execution = relationship("TableExecution", back_populates="schedules", foreign_keys=[table_execution_id])

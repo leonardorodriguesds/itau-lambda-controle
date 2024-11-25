@@ -8,6 +8,7 @@ class Dependencies(AbstractBase):
     id = Column(Integer, primary_key=True)
     table_id = Column(Integer, ForeignKey('tables.id'), nullable=False)
     dependency_id = Column(Integer, ForeignKey('tables.id'), nullable=False)
+    optative_with_dependency_id = Column(Integer, ForeignKey('dependencies.id'), nullable=True)
     is_required = Column(Boolean, default=False)
     
     table = relationship("Tables", foreign_keys=[table_id], back_populates="dependencies")

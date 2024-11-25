@@ -1,7 +1,10 @@
 import json
 import logging
 import argparse
+import os
+import boto3
 from pydantic import ValidationError
+from app.service.event_bridge_scheduler_service import EventBridgeSchedulerService
 from service.task_schedule_service import TaskScheduleService
 from models.dto.table_partition_exec_dto import TablePartitionExecDTO
 from service.table_partition_exec_service import TablePartitionExecService
@@ -22,8 +25,16 @@ def lambda_handler(event, context):
     logger.info(f"Received event: {event}")
     session_generator = get_session()
     session = next(session_generator)
+    
+    boto_session = session = boto3.Session(
+        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        region_name=os.getenv("AWS_REGION")
+    )
+    
     table_service = TableService(session, logger)
     table_partition_exec_service = TablePartitionExecService(session, logger)
+    event_bridge_scheduler_service = EventBridgeSchedulerService(session, logger, boto_session)
     task_schedule_servide = TaskScheduleService(session, logger)
     task_schedule_servide.start_schedule()
 

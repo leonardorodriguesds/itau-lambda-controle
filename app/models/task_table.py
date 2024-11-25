@@ -14,3 +14,4 @@ class TaskTable(AbstractBase):
     
     table = relationship("Tables", back_populates="task_table", foreign_keys=[table_id])
     task_executor = relationship("TaskExecutor", back_populates="task_table", foreign_keys=[task_executor_id])
+    approval_status = relationship("ApprovalStatus", back_populates="task_table", uselist=False)
