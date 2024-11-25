@@ -24,9 +24,3 @@ class Tables(AbstractBase):
     task_table = relationship("TaskTable", back_populates="table", foreign_keys="[TaskTable.table_id]")
     table_partition_execs = relationship("TablePartitionExec", back_populates="table")
     table_executions = relationship("TableExecution", back_populates="table")
-
-    def dict(self):
-        """
-        Retorna um dicionário contendo os atributos principais.
-        """
-        return {key: getattr(self, key) for key in self.__mapper__.columns.keys()}

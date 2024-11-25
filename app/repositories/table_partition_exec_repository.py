@@ -1,34 +1,20 @@
 from logging import Logger
+from typing import List
 from sqlalchemy.orm import Session
+from repositories.generic_repository import GenericRepository
 from models.table_partition_exec import TablePartitionExec
 
-class TablePartitionExecRepository:
-    def __init__(self, session, logger: Logger):
+class TablePartitionExecRepository(GenericRepository[TablePartitionExec]):
+    def __init__(self, session: Session, logger: Logger):
+        super().__init__(session, TablePartitionExec, logger)
         self.session = session
         self.logger = logger
 
-    def save(self, exec_entry: TablePartitionExec):
-        """
-        Salva um registro de execução no banco de dados.
-        """
-        self.session.add(exec_entry)
-
-    def commit(self):
-        """
-        Faz o commit das alterações no banco de dados.
-        """
-        self.session.commit()
-
-    def rollback(self):
-        """
-        Reverte as alterações no banco de dados.
-        """
-        self.session.rollback()
-
-    def get_latest_by_table_partition(self, table_id: int, partition_id: int):
+    def get_latest_by_table_partition(self, table_id: int, partition_id: int) -> TablePartitionExec:
         """
         Retorna o registro mais recente com `tag_latest = True` para uma combinação de table_id e partition_id.
         """
+        self.logger.debug(f"[{self.__class__.__name__}] Getting latest by table and partition: [{table_id}] [{partition_id}]")
         return (
             self.session.query(TablePartitionExec)
             .filter(
@@ -39,16 +25,14 @@ class TablePartitionExecRepository:
             .first()
         )
 
-    def get_by_table_partition_and_value(self, table_id: int, partition_id: int, value: str):
+    def get_by_table_partition_and_value(self, table_id: int, partition_id: int, value: str) -> TablePartitionExec:
+        self.logger.debug(f"[{self.__class__.__name__}] Getting by table, partition and value: [{table_id}] [{partition_id}] [{value}]")
         return self.session.query(TablePartitionExec).filter_by(
             table_id=table_id,
             partition_id=partition_id,
             value=value
         ).first()
         
-    def get_by_execution(self, execution_id: int) -> TablePartitionExec:
-        self.logger.debug(f"[TablePartitionExecRepository] Getting partitions exec for execution: [{execution_id}]")
+    def get_by_execution(self, execution_id: int) -> List[TablePartitionExec]:
+        self.logger.debug(f"[{self.__class__.__name__}] Getting partitions exec for execution: [{execution_id}]")
         return self.session.query(TablePartitionExec).filter_by(execution_id=execution_id).all()
-
-
-

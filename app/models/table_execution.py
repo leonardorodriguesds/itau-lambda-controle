@@ -10,7 +10,6 @@ class TableExecution(AbstractBase):
     table_id = Column(Integer, ForeignKey('tables.id'), nullable=False)
     date_time = Column(DateTime, default=datetime.utcnow, nullable=False)
     source = Column(String(255), nullable=False)
-    deletion_date = Column(DateTime, nullable=True)
     
     table = relationship("Tables", back_populates="table_executions")
     table_partition_execs = relationship("TablePartitionExec", back_populates="execution")

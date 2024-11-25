@@ -7,7 +7,7 @@ from models.task_table import TaskTable
 import boto3
 import json
 from logging import Logger
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from models.table_execution import TableExecution
 
 class TaskService:
@@ -15,13 +15,14 @@ class TaskService:
         self.session = session
         self.logger = logger
 
-    def process(self, task_table: TaskTable, execution: TableExecution, partition_execs: List[TablePartitionExec]):
-        self.logger.debug(f"[TaskService] Processing task: [{task_table.alias}] for execution: [{execution.id}]")
+    def process(self, task_table: TaskTable, execution: TableExecution, dependencies_executions: Dict[str, Dict[str, Any]]):
+        self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Processing task: [{task_table.alias}] for execution: [{execution.id}]")
         task: TaskExecutor = task_table.task_executor
-        table_info: TableExecDTO = transform_to_table_exec_dto(execution, partition_execs)
+        
+        table_info: TableExecDTO = transform_to_table_exec_dto(execution, dependencies_executions)
         
         if task.method == "stepfunction_process":
-            self.logger.debug(f"[TaskService] Processing task: [{task_table.alias}] for execution: [{execution.id}]")
+            self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Processing stepfunction: [{task_table.alias}] for execution: [{execution.id}]")
             self.stepfunction_process(execution, self.interpolate_payload(task_table.params, table_info, execution, task, task_table, task_table.table), task_table.task_executor.stepfunction_arn)
             
     def interpolate_payload(
@@ -31,7 +32,8 @@ class TaskService:
         table_execution: TableExecution,
         task_executor: TaskExecutor,
         task_table: TaskTable,
-        table: Tables
+        table: Tables,
+        dependencies_executions: Dict[str, Dict[str, Any]]
     ) -> dict:
         """
         Interpola variáveis em um payload JSON usando informações de TableExecDTO, TableExecution, TaskExecutor, TaskTable e Table.
@@ -45,10 +47,10 @@ class TaskService:
         :return: Payload interpolado com valores das variáveis, ou TableExecDTO se o payload for vazio.
         """
         if not payload:
-            self.logger.debug("[TaskService] Payload vazio. Retornando TableExecDTO como resposta.")
+            self.logger.debug(f"[{self.__class__.__name__}] Payload vazio. Retornando TableExecDTO como resposta.")
             return table_exec.dict()
 
-        self.logger.debug(f"[TaskService] Interpolando payload com Jinja: {payload}")
+        self.logger.debug(f"[{self.__class__.__name__}] Interpolando payload com Jinja: {payload}")
 
         try:
             payload_str = json.dumps(payload)
@@ -60,14 +62,17 @@ class TaskService:
                 "task_executor": task_executor.dict(),
                 "task_table": task_table.dict(),
                 "table": table.dict(),
+                "dependencies": dependencies_executions.__dict__
             }
+            
+            self.logger.debug(f"[{self.__class__.__name__}] Contexto de interpolação: [{context}]")
 
             interpolated_payload = template.render(**context)
 
             return json.loads(interpolated_payload)
 
         except Exception as e:
-            self.logger.error(f"[TaskService] Erro ao interpolar payload: {e}")
+            self.logger.error(f"[{self.__class__.__name__}] Erro ao interpolar payload: {e}")
             raise
 
     def stepfunction_process(self, execution: TableExecution, payload: dict, stepfunction_arn: str):
@@ -79,7 +84,7 @@ class TaskService:
         :param stepfunction_arn: O ARN da Step Function que será invocada.
         """
         try:
-            self.logger.debug(f"[TaskService] Invoking Step Function [{stepfunction_arn}] for execution: [{execution.id}]")
+            self.logger.debug(f"[{self.__class__.__name__}] Invoking Step Function [{stepfunction_arn}] for execution: [{execution.id}]")
             
             client = boto3.client('stepfunctions')
 

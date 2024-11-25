@@ -1,7 +1,10 @@
+from concurrent.futures import ThreadPoolExecutor
 from logging import Logger
-from typing import List
+from threading import get_native_id
+from typing import Any, Dict, List
 from sqlalchemy.orm import Session
 from datetime import datetime
+from models.dependencies import Dependencies
 from models.partitions import Partitions
 from service.task_service import TaskService
 from service.partition_service import PartitionService
@@ -20,29 +23,64 @@ class TablePartitionExecService:
         self.logger = logger
         self.repository = TablePartitionExecRepository(session, logger)
         self.table_service = TableService(session, logger)
-        self.table_execution_repository = TableExecutionService(session, logger)
+        self.table_execution_service = TableExecutionService(session, logger)
         self.partition_service = PartitionService(session, logger)
         self.task_service = TaskService(session, logger)
         
-    def trigger_tables(self, table_id: int):
-        self.logger.debug(f"[TablePartitionExecService] Triggering tables for: [{table_id}]")
+    def trigger_tables(self, table_id: int, current_partitions: Dict[str, Any] = None):
+        table = self.table_service.find(table_id=table_id)
+        self.logger.debug(f"[{self.__class__.__name__}] Triggering tables for: [{table.name}]")
         tables: List[Tables] = self.table_service.find_by_dependency(table_id)
         
-        for table in tables:
-            dependencies_latest = {
-                d.id: self.table_execution_repository.get_latest_execution(d.id)
-                for d in table.dependencies
+        last_execution: TableExecution = self.table_execution_service.get_latest_execution(table_id)
+        if not current_partitions:
+            current_partitions = {
+                p.partition.name: p.value
+                for p in self.repository.get_by_execution(last_execution.id)
             }
-            
-            dependencies_partitions_strings = {
-                d.dependency_table.name: " AND ".join([f"{p.partition.name}=={p.value}" for p in self.repository.get_by_execution(dependencies_latest[d.id].id)])
-                for d in table.dependencies if dependencies_latest.get(d.id)
-            }
-            
-            self.logger.debug(f"[TablePartitionExecService] Dependencies partitions strings: {dependencies_partitions_strings}")
-                        
-            partitions: List[Partitions] = table.partitions
-            
+        
+        def process_table(table: Tables):
+            """
+            Processa cada tabela de forma independente dentro de uma thread.
+            """
+            thread_id = get_native_id() 
+            start_time = datetime.now() 
+            self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Processing table [{table.name}] in thread")
+            try:
+                def resolve_dependency(dependency: Dependencies) -> Dict[str, Any]:
+                    """
+                    Resolve as dependências recursivamente.
+                    """
+                    execution: TableExecution = self.table_execution_service.get_latest_execution_with_restrictions(dependency.id, current_partitions)
+                    if not execution:
+                        self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] No execution found for dependency [{dependency.dependency_table.name}]")
+                        return None
+                    self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Execution found for dependency [{dependency.dependency_table.name}]: [{execution.id}]")
+                    return {
+                        p.partition.name: p.value for p in self.repository.get_by_execution(execution.id)
+                    }
+                    
+                dependencies_partitions = {
+                    d.dependency_table.name: resolve_dependency(d) for d in table.dependencies
+                }
+
+                self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Dependencies partitions for table [{table.name}]: {dependencies_partitions}")
+                
+                for dep in table.dependencies:
+                    if dep.is_required and not dependencies_partitions[dep.dependency_table.name]:
+                        self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] No execution found for dependency [{dep}]")
+                        return
+                    
+                for task in table.task_table:
+                    self.task_service.process(task, table, last_execution, dependencies_partitions)
+            except Exception as e:
+                self.logger.error(f"[{self.__class__.__name__}][{thread_id}] Error processing table [{table.name}]: {e}")
+            finally:
+                end_time = datetime.now()
+                self.logger.debug(f"[{self.__class__.__name__}][{thread_id}] Table [{table.name}] processed in {end_time - start_time}")
+
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(process_table, tables)      
             
         
     def register_multiple_events(self, dtos: list[TablePartitionExecDTO]):
@@ -52,12 +90,9 @@ class TablePartitionExecService:
         try:
             for dto in dtos:
                 self.register_partitions_exec(dto)
-
-            self.repository.commit()
             return {"message": f"{len(dtos)} eventos registrados com sucesso."}
 
         except Exception as e:
-            self.repository.rollback()
             raise TableInsertError(f"Erro ao registrar múltiplos eventos: {str(e)}")
 
     def register_partitions_exec(self, dto: TablePartitionExecDTO):
@@ -69,7 +104,7 @@ class TablePartitionExecService:
         3. Todas as partições fornecidas devem estar associadas à tabela.
         4. Atualiza automaticamente a versão mais recente para cada conjunto `table x partition`.
         """
-        self.logger.debug(f"[TablePartitionExecService] Registering partitions exec for: {dto}")
+        self.logger.debug(f"[{self.__class__.__name__}] Registering partitions exec for: {dto}")
         try:
             table = None
             if dto.table_id:
@@ -122,7 +157,7 @@ class TablePartitionExecService:
                     f"As seguintes partições obrigatórias estão faltando: {', '.join(missing_names)}"
                 )
 
-            new_execution = self.table_execution_repository.create_execution(table.id, dto.source)
+            new_execution = self.table_execution_service.create_execution(table.id, dto.source)
 
             for partition in resolved_partitions:
                 new_entry = TablePartitionExec(
@@ -134,11 +169,9 @@ class TablePartitionExecService:
                 )
                 self.repository.save(new_entry)
 
-            self.repository.commit()
             self.trigger_tables(new_execution.table_id)
             return {"message": "Table partition execution entries registered successfully."}
 
         except Exception as e:
-            self.repository.rollback()
             raise TableInsertError(f"Erro ao registrar execuções de partições: {str(e)}")
 

@@ -25,16 +25,16 @@ class TableService:
         Salva múltiplas tabelas em uma transação única. 
         Apenas comita se todas as tabelas forem salvas com sucesso.
         """
+        self.logger.debug(f"[{self.__class__.__name__}] Saving multiple tables: [{tables_dto}]")
         try:
             for table_dto in tables_dto:
                 self.save_table(table_dto, user)
-            self.session.commit()  
             return "All tables saved successfully."
         except Exception as e:
-            self.session.rollback()  
-            raise TableInsertError(f"Error saving multiple tables: {str(e)}")
+            raise TableInsertError(f"[{self.__class__.__name__}] Error saving multiple tables: {str(e)}")
         
     def find(self, table_id: Optional[str] = None, table_name: Optional[str] = None):
+        self.logger.debug(f"[{self.__class__.__name__}] Finding table: [{table_id}] [{table_name}]")
         if table_id:
             table = self.table_repository.get_by_id(table_id)
             if not table:
@@ -49,6 +49,7 @@ class TableService:
             raise TableInsertError("Table id or name is required.")
 
     def save_table(self, table_dto: TableDTO, user: str):
+        self.logger.debug(f"[{self.__class__.__name__}] Saving table: [{table_dto}]")
         if not table_dto:
             raise TableInsertError("Table data is required.")
 
@@ -78,10 +79,11 @@ class TableService:
         return f"Table '{table.name}' saved successfully."
     
     def get_latest(self, table_id: Optional[str], table_name: Optional[str]):
+        self.logger.debug(f"[{self.__class__.__name__}] Getting latest execution for table: [{table_id}] [{table_name}]")
         table: Tables = self.find(table_id, table_name)
         
         return self.table_execution_service.get_latest_execution(table.id)
         
     def find_by_dependency(self, table_id: int):
-        self.logger.debug(f"[TableService] Finding tables by dependency: [{table_id}]")
+        self.logger.debug(f"[{self.__class__.__name__}] Finding tables by dependency: [{table_id}]")
         return self.table_repository.get_by_dependecy(table_id)
