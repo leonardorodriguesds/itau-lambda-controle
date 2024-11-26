@@ -64,7 +64,7 @@ class GenericRepository(Generic[T]):
         :param obj: Objeto a ser adicionado.
         :return: Objeto adicionado.
         """
-        self.logger.debug(f"[{self.__class__.__name__}] Adding object: [{obj}]")
+        self.logger.debug(f"[{self.__class__.__name__}] Adding object: [{obj.__dict__}]")
         self.db_session.add(obj)
         self.db_session.commit()
         self.db_session.refresh(obj)

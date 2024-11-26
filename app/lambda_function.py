@@ -4,105 +4,114 @@ import argparse
 import os
 import boto3
 from pydantic import ValidationError
-from app.service.event_bridge_scheduler_service import EventBridgeSchedulerService
-from service.task_schedule_service import TaskScheduleService
-from models.dto.table_partition_exec_dto import TablePartitionExecDTO
-from service.table_partition_exec_service import TablePartitionExecService
+from aws_lambda_powertools.event_handler import ApiGatewayResolver
+from aws_lambda_powertools.utilities.typing import LambdaContext
 from service.database import get_session
-from models.dto.table_dto import TableDTO, validate_tables
-from exceptions.table_insert_error import TableInsertError
 from service.table_service import TableService
+from service.table_partition_exec_service import TablePartitionExecService
+from service.event_bridge_scheduler_service import EventBridgeSchedulerService
+from models.dto.table_dto import TableDTO, validate_tables
+from models.dto.table_partition_exec_dto import TablePartitionExecDTO
+from exceptions.table_insert_error import TableInsertError
 
+# Configuração do logger
 logger = logging.getLogger()
-logger.setLevel(logging.INFO) 
+logger.setLevel(logging.INFO)
 
 handler = logging.StreamHandler()
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-def lambda_handler(event, context):
-    logger.info(f"Received event: {event}")
+app = ApiGatewayResolver()
+
+
+def get_session_generator():
+    """Cria e retorna um gerador de sessão de banco de dados."""
     session_generator = get_session()
-    session = next(session_generator)
-    
-    boto_session = session = boto3.Session(
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        region_name=os.getenv("AWS_REGION")
-    )
-    
-    table_service = TableService(session, logger)
-    table_partition_exec_service = TablePartitionExecService(session, logger)
-    event_bridge_scheduler_service = EventBridgeSchedulerService(session, logger, boto_session)
-    task_schedule_servide = TaskScheduleService(session, logger)
-    task_schedule_servide.start_schedule()
+    return session_generator, next(session_generator)
 
+
+@app.get("/health")
+def health_check():
+    logger.info("Health check route accessed")
+    return {"status": "OK"}
+
+
+@app.post("/add_table")
+def add_table():
+    session_generator, session = get_session_generator()
     try:
-        event_type = event.get("event")
-        data = event.get("data")
-        user = event.get("user")
+        body = app.current_event.json_body
+        data = body.get("data")
+        user = body.get("user")
 
-        if not event_type:
-            raise ValueError("Event type is required")
         if not data:
             raise ValueError("Data is required")
 
-        if event_type in ["add_table", "update_table"]:
-            if isinstance(data, list):
-                tables = [TableDTO(**item) for item in data]
-                validate_tables(tables)
-                message = table_service.save_multiple_tables(tables, user)
-            else:
-                table = TableDTO(**data)
-                message = table_service.save_table(table, user)
-
-            status_code = 200
-
-        elif event_type == "register_execution":
-            if isinstance(data, list):
-                executions_dto = [TablePartitionExecDTO(**item, user=user) for item in data]
-                message = table_partition_exec_service.register_multiple_events(executions_dto)
-            else:
-                execution_dto = TablePartitionExecDTO(**data, user=user)
-                message = table_partition_exec_service.register_partitions_exec(execution_dto)
-
-            status_code = 200
-
-        else:
-            raise ValueError(f"Invalid event type: {event_type}")
-
-        return {
-            "statusCode": status_code,
-            "body": json.dumps({"message": message})
-        }
-
-    except ValidationError as e:
-        logger.error(f"Validation error: {e}")
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"message": f"Validation error: {e}"})
-        }
-    except TableInsertError as e:
-        logger.error(f"Table insert error: {e}")
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"message": f"Table insert error: {str(e)}"})
-        }
-    except ValueError as e:
-        logger.error(f"Input error: {e}")
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"message": f"Input error: {str(e)}"})
-        }
+        table_service = TableService(session, logger)
+        tables = [TableDTO(**item) for item in data]
+        validate_tables(tables)
+        message = table_service.save_multiple_tables(tables, user)
+        return {"message": message}
     except Exception as e:
-        logger.exception(f"Unexpected error: {e}")
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"message": "An unexpected error occurred"})
-        }
+        logger.exception(f"Error in add_table: {e}")
+        return {"message": f"Error: {str(e)}"}
     finally:
         session_generator.close()
+
+
+@app.post("/update_table")
+def update_table():
+    session_generator, session = get_session_generator()
+    try:
+        body = app.current_event.json_body
+        data = body.get("data")
+        user = body.get("user")
+
+        if not data:
+            raise ValueError("Data is required")
+
+        table_service = TableService(session, logger)
+        table = TableDTO(**data)
+        message = table_service.save_table(table, user)
+        return {"message": message}
+    except Exception as e:
+        logger.exception(f"Error in update_table: {e}")
+        return {"message": f"Error: {str(e)}"}
+    finally:
+        session_generator.close()
+
+
+@app.post("/register_execution")
+def register_execution():
+    session_generator, session = get_session_generator()
+    try:
+        body = app.current_event.json_body
+        data = body.get("data")
+        user = body.get("user")
+
+        if not data:
+            raise ValueError("Data is required")
+
+        table_partition_exec_service = TablePartitionExecService(session, logger)
+        if isinstance(data, list):
+            executions_dto = [TablePartitionExecDTO(**item, user=user) for item in data]
+            message = table_partition_exec_service.register_multiple_events(executions_dto)
+        else:
+            execution_dto = TablePartitionExecDTO(**data, user=user)
+            message = table_partition_exec_service.register_partitions_exec(execution_dto)
+
+        return {"message": message}
+    except Exception as e:
+        logger.exception(f"Error in register_execution: {e}")
+        return {"message": f"Error: {str(e)}"}
+    finally:
+        session_generator.close()
+
+
+def lambda_handler(event, context: LambdaContext):
+    return app.resolve(event, context)
 
 
 def main():
@@ -122,12 +131,16 @@ def main():
     )
 
     args = parser.parse_args()
-    
+
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
 
     try:
         with open(args.file, "r") as file:
             event = json.load(file)
+
+        if "body" in event and isinstance(event["body"], dict):
+            event["body"] = json.dumps(event["body"])
+
     except FileNotFoundError:
         print(f"Erro: O arquivo '{args.file}' não foi encontrado.")
         return
@@ -135,7 +148,9 @@ def main():
         print("Erro: Formato JSON inválido.")
         return
 
-    response = lambda_handler(event, None)
+    context = None
+    response = lambda_handler(event, context)
+    
     print("Resposta da Lambda:")
     print(json.dumps(response, indent=2))
 

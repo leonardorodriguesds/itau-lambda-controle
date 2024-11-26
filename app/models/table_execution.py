@@ -13,3 +13,4 @@ class TableExecution(AbstractBase):
     
     table = relationship("Tables", back_populates="table_executions")
     table_partition_execs = relationship("TablePartitionExec", back_populates="execution")
+    schedules = relationship("TaskSchedule", back_populates="table_execution", foreign_keys="[TaskSchedule.table_execution_id]")

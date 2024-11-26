@@ -13,4 +13,4 @@ class ApprovalStatus(AbstractBase):
     reviewed_at = Column(DateTime, nullable=True)
     approver_name = Column(String(255), nullable=True) 
     
-    task = relationship("TaskTable", back_populates="approval_status")
+    task_table = relationship("TaskTable", back_populates="approval_status")

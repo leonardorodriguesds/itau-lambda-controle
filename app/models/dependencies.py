@@ -13,3 +13,4 @@ class Dependencies(AbstractBase):
     
     table = relationship("Tables", foreign_keys=[table_id], back_populates="dependencies")
     dependency_table = relationship("Tables", foreign_keys=[dependency_id], back_populates="dependent_tables")
+    optative_with_dependency = relationship("Dependencies", foreign_keys=[optative_with_dependency_id])

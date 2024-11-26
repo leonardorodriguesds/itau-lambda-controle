@@ -75,7 +75,7 @@ def upgrade() -> None:
         sa.Column('date_deleted', mysql.DATETIME(), nullable=True),
         sa.Column('deleted_by', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=True),  
         sa.Column('tenant_id', mysql.INTEGER(), nullable=False, server_default='1'),
-        sa.Column('optative_with_dependency_id', mysql.INTEGER(), autoincrement=False, nullable=False),
+        sa.Column('optative_with_dependency_id', mysql.INTEGER(), autoincrement=False, nullable=True),
         sa.ForeignKeyConstraint(['dependency_id'], ['tables.id'], name='dependencies_ibfk_2'),
         sa.ForeignKeyConstraint(['table_id'], ['tables.id'], name='dependencies_ibfk_1'),
         sa.ForeignKeyConstraint(['optative_with_dependency_id'], ['dependencies.id'], name='dependencies_ibfk_3'),
@@ -146,15 +146,13 @@ def upgrade() -> None:
     op.create_table(
         'task_schedule',
         sa.Column('id', mysql.INTEGER(), autoincrement=True, nullable=False),
-        sa.Column('task_id', mysql.INTEGER(), autoincrement=False, nullable=False),
-        sa.Column('last_event_time', mysql.DATETIME(), nullable=False),
+        sa.Column('task_id', mysql.INTEGER(), nullable=False),
+        sa.Column('last_event_time', mysql.DATETIME(), nullable=False, server_default=sa.text('CURRENT_TIMESTAMP')),
         sa.Column('scheduled_execution_time', mysql.DATETIME(), nullable=True),
         sa.Column('status', mysql.VARCHAR(collation='utf8mb4_general_ci', length=50), nullable=False, server_default='pending'),
-        sa.Column('executed', mysql.TINYINT(display_width=1), nullable=False, server_default='0'),
-        sa.Column('date_deleted', mysql.DATETIME(), nullable=True),
-        sa.Column('tenant_id', mysql.INTEGER(), nullable=False, server_default='1'),
-        sa.Column('event_bridge_id', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=False),
+        sa.Column('executed', mysql.TINYINT(1), nullable=False, server_default='0'),
         sa.Column('table_execution_id', mysql.INTEGER(), nullable=False),
+        sa.Column('unique_alias', mysql.VARCHAR(collation='utf8mb4_general_ci', length=350), nullable=False),
         sa.ForeignKeyConstraint(['task_id'], ['task_table.id'], name='task_schedule_ibfk_1'),
         sa.ForeignKeyConstraint(['table_execution_id'], ['table_execution.id'], name='task_schedule_ibfk_2'),
         sa.PrimaryKeyConstraint('id'),
@@ -162,8 +160,7 @@ def upgrade() -> None:
         mysql_collate='utf8mb4_general_ci',
         mysql_default_charset='utf8mb4',
         mysql_engine='InnoDB'
-    )
-    
+    )    
     op.create_table('approval_status',
         sa.Column('id', mysql.INTEGER(), autoincrement=True, nullable=False),
         sa.Column('task_table_id', mysql.INTEGER(), autoincrement=False, nullable=False),  

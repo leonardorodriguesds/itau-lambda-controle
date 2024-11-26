@@ -1,50 +1,53 @@
 {
-    "event": "register_execution",
-    "data": [
-        {
-            "table_name": "tbjf001_op_pdz_prep",
-            "partitions": [
-                {"partition_name": "ano_mes_referencia", "value": "2405"},
-                {"partition_name": "versao_processamento", "value": "1"},
-                {"partition_name": "identificador_empresa", "value": "0"}
-            ],
-            "source": "glue"
-        },
-        {
-            "table_name": "tbjf001_op_pdz_prep",
-            "partitions": [
-                {"partition_name": "ano_mes_referencia", "value": "2405"},
-                {"partition_name": "versao_processamento", "value": "2"},
-                {"partition_name": "identificador_empresa", "value": "0"}
-            ],
-            "source": "glue"
-        },
-        {
-            "table_name": "tbjf002_op_plz_prep",
-            "partitions": [
-                {"partition_name": "ano_mes_referencia", "value": "2405"},
-                {"partition_name": "versao_processamento", "value": "1"},
-                {"partition_name": "identificador_empresa", "value": "0"}
-            ],
-            "source": "glue"
-        },
-        {
-            "table_name": "tb_modalidade_prep",
-            "partitions": [
-                {"partition_name": "ano_mes_referencia", "value": "2405"},
-                {"partition_name": "versao_processamento", "value": "1"}
-            ],
-            "source": "glue"
-        },
-        {
-            "table_name": "tbjf001_op_pdz_prep",
-            "partitions": [
-                {"partition_name": "ano_mes_referencia", "value": "2405"},
-                {"partition_name": "versao_processamento", "value": "3"},
-                {"partition_name": "identificador_empresa", "value": "0"}
-            ],
-            "source": "glue"
-        }
-    ],
-    "user": "lrcxpnu"
+    "httpMethod": "POST",
+    "path": "/register_execution",
+    "body": {
+        "data": [
+            {
+                "table_name": "tbjf001_op_pdz_prep",
+                "partitions": [
+                    {"partition_name": "ano_mes_referencia", "value": "2405"},
+                    {"partition_name": "versao_processamento", "value": "1"},
+                    {"partition_name": "identificador_empresa", "value": "0"}
+                ],
+                "source": "glue"
+            },
+            {
+                "table_name": "tbjf001_op_pdz_prep",
+                "partitions": [
+                    {"partition_name": "ano_mes_referencia", "value": "2405"},
+                    {"partition_name": "versao_processamento", "value": "2"},
+                    {"partition_name": "identificador_empresa", "value": "0"}
+                ],
+                "source": "glue"
+            },
+            {
+                "table_name": "tbjf002_op_plz_prep",
+                "partitions": [
+                    {"partition_name": "ano_mes_referencia", "value": "2405"},
+                    {"partition_name": "versao_processamento", "value": "1"},
+                    {"partition_name": "identificador_empresa", "value": "0"}
+                ],
+                "source": "glue"
+            },
+            {
+                "table_name": "tb_modalidade_prep",
+                "partitions": [
+                    {"partition_name": "ano_mes_referencia", "value": "2405"},
+                    {"partition_name": "versao_processamento", "value": "1"}
+                ],
+                "source": "glue"
+            },
+            {
+                "table_name": "tbjf001_op_pdz_prep",
+                "partitions": [
+                    {"partition_name": "ano_mes_referencia", "value": "2405"},
+                    {"partition_name": "versao_processamento", "value": "3"},
+                    {"partition_name": "identificador_empresa", "value": "0"}
+                ],
+                "source": "glue"
+            }
+        ],
+        "user": "lrcxpnu"
+    }
 }
