@@ -1,3 +1,4 @@
+from injector import inject
 from jinja2 import Template
 from models.tables import Tables
 from models.dto.table_exec_dto import TableExecDTO, transform_to_table_exec_dto
@@ -11,8 +12,8 @@ from typing import Any, Dict, List, Optional
 from models.table_execution import TableExecution
 
 class TaskService:
-    def __init__(self, session, logger: Logger):
-        self.session = session
+    @inject
+    def __init__(self, logger: Logger):
         self.logger = logger
 
     def process(self, task_table: TaskTable, execution: TableExecution, dependencies_executions: Dict[str, Dict[str, Any]]):

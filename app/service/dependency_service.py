@@ -1,5 +1,7 @@
 from logging import Logger
 from typing import List
+
+from injector import inject
 from models.dependencies import Dependencies
 from models.dto.table_dto import DependencyDTO
 from exceptions.table_insert_error import TableInsertError
@@ -7,11 +9,11 @@ from repositories.dependency_repository import DependencyRepository
 from repositories.table_repository import TableRepository
 
 class DependencyService:
-    def __init__(self, session, logger: Logger):
-        self.session = session
+    @inject
+    def __init__(self, logger: Logger, repository: TableRepository, dependency_repository: DependencyRepository):
         self.logger = logger
-        self.dependency_repository = DependencyRepository(session, logger)
-        self.table_repo = TableRepository(session, logger)
+        self.repository = repository
+        self.dependency_repository = dependency_repository
 
     def save_dependencies(self, table_id: int, dependencies_dto: List[DependencyDTO]):
         existing_dependencies = {
@@ -25,7 +27,7 @@ class DependencyService:
                 )
                 self.dependency_repository.save(dependency)
             elif not dependency_data.dependency_id and dependency_data.dependency_name:
-                dependency_table = self.table_repo.get_by_name(dependency_data.dependency_name)
+                dependency_table = self.repository.get_by_name(dependency_data.dependency_name)
                 if not dependency_table:
                     raise TableInsertError(f"Dependency table '{dependency_data.dependency_name}' not found.")
                 dependency = Dependencies(

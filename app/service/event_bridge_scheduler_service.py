@@ -2,20 +2,19 @@ from datetime import datetime, timedelta
 from logging import Logger
 import os
 from botocore.session import Session
-import boto3
+from injector import inject
 
 from models.table_execution import TableExecution
 from models.task_executor import TaskExecutor
 from models.task_table import TaskTable
 from models.task_schedule import TaskSchedule
 
-import boto3
 from datetime import datetime, timedelta
 from logging import Logger
 
 class EventBridgeSchedulerService:
-    def __init__(self, session, logger: Logger, boto_session: Session):
-        self.session = session
+    @inject
+    def __init__(self, logger: Logger, boto_session: Session):
         self.logger = logger
         self.scheduler_client = boto_session.client(
             'events',

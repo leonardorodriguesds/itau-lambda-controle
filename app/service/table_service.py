@@ -1,6 +1,8 @@
 from datetime import datetime
 from logging import Logger
 from typing import List, Optional
+
+from injector import inject
 from service.table_execution_service import TableExecutionService
 from models.dto.table_dto import TableDTO
 from models.tables import Tables
@@ -11,14 +13,14 @@ from service.partition_service import PartitionService
 from service.task_executor_service import TaskExecutorService
 
 class TableService:
-    def __init__(self, session, logger: Logger):
-        self.session = session
+    @inject
+    def __init__(self, logger: Logger, table_repository: TableRepository, dependency_service: DependencyService, partition_service: PartitionService, task_executor_service: TaskExecutorService, table_execution_service: TableExecutionService):
         self.logger = logger
-        self.table_repository = TableRepository(session, logger)
-        self.dependency_service = DependencyService(session, logger)
-        self.partition_service = PartitionService(session, logger)
-        self.task_executor_service = TaskExecutorService(session, logger)
-        self.table_execution_service = TableExecutionService(session, logger)
+        self.table_repository = table_repository
+        self.dependency_service = dependency_service
+        self.partition_service = partition_service
+        self.task_executor_service = task_executor_service
+        self.table_execution_service = table_execution_service
 
     def save_multiple_tables(self, tables_dto: List[TableDTO], user: str):
         """

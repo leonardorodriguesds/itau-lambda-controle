@@ -1,13 +1,16 @@
 from logging import Logger
 from typing import List
+from injector import inject
 from sqlalchemy.orm import Session
+from config.session_provider import SessionProvider
 from repositories.generic_repository import GenericRepository
 from models.table_partition_exec import TablePartitionExec
 
 class TablePartitionExecRepository(GenericRepository[TablePartitionExec]):
-    def __init__(self, session: Session, logger: Logger):
-        super().__init__(session, TablePartitionExec, logger)
-        self.session = session
+    @inject
+    def __init__(self, session_provider: SessionProvider, logger: Logger):
+        super().__init__(session_provider.get_session(), TablePartitionExec, logger)
+        self.session = session_provider.get_session()
         self.logger = logger
 
     def get_latest_by_table_partition(self, table_id: int, partition_id: int) -> TablePartitionExec:

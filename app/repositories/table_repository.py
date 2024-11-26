@@ -1,12 +1,15 @@
 from logging import Logger
+from injector import inject
 from sqlalchemy.orm import Session
+from config.session_provider import SessionProvider
 from repositories.generic_repository import GenericRepository
 from models.tables import Tables
 
 class TableRepository(GenericRepository[Tables]):
-    def __init__(self, session: Session, logger: Logger):
-        super().__init__(session, Tables, logger)
-        self.session = session
+    @inject
+    def __init__(self, session_provider: SessionProvider, logger: Logger):
+        super().__init__(session_provider.get_session(), Tables, logger)
+        self.session = session_provider.get_session()
         self.logger = logger
 
     def get_by_name(self, name):

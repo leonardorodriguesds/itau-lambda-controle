@@ -1,14 +1,17 @@
 from logging import Logger
 from typing import List
+
+from injector import inject
+
 from models.partitions import Partitions
 from models.dto.table_dto import PartitionDTO
 from repositories.partition_repository import PartitionRepository
 
 class PartitionService:
-    def __init__(self, session, logger: Logger):
-        self.session = session
+    @inject
+    def __init__(self, logger: Logger, repository: PartitionRepository):
         self.logger = logger
-        self.repository = PartitionRepository(session, logger)
+        self.repository = repository
 
     def save_partitions(self, table_id: int, partitions_dto: List[PartitionDTO]):
         self.logger.debug(f"[{self.__class__.__name__}] Saving partitions for table [{table_id}]")

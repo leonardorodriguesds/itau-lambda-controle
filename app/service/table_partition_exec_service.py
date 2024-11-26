@@ -2,10 +2,9 @@ from concurrent.futures import ThreadPoolExecutor
 from logging import Logger
 from threading import get_native_id
 from typing import Any, Dict, List
-from sqlalchemy.orm import Session
+from injector import inject
 from datetime import datetime
 from models.dependencies import Dependencies
-from models.partitions import Partitions
 from service.task_service import TaskService
 from service.partition_service import PartitionService
 from service.table_service import TableService
@@ -18,15 +17,15 @@ from exceptions.table_insert_error import TableInsertError
 from repositories.table_partition_exec_repository import TablePartitionExecRepository
 
 class TablePartitionExecService:
-    def __init__(self, session, logger: Logger):
-        self.session = session
+    @inject
+    def __init__(self, logger: Logger, repository: TablePartitionExecRepository, table_service: TableService, table_execution_service: TableExecutionService, partition_service: PartitionService, task_service: TaskService):
         self.logger = logger
-        self.repository = TablePartitionExecRepository(session, logger)
-        self.table_service = TableService(session, logger)
-        self.table_execution_service = TableExecutionService(session, logger)
-        self.partition_service = PartitionService(session, logger)
-        self.task_service = TaskService(session, logger)
-        
+        self.repository = repository
+        self.table_service = table_service
+        self.table_execution_service = table_execution_service
+        self.partition_service = partition_service
+        self.task_service = task_service
+                
     def trigger_tables(self, table_id: int, current_partitions: Dict[str, Any] = None):
         table = self.table_service.find(table_id=table_id)
         self.logger.debug(f"[{self.__class__.__name__}] Triggering tables for: [{table.name}]")
