@@ -28,10 +28,10 @@ class EventBridgeSchedulerService:
         self.logger.debug(f"[{self.__class__.__name__}] Registering event for task [{task_table.id}]: [{task_table.alias}]")
         
         task: TaskExecutor = task_table.task_executor
-        unique_alias = f"{task_table.alias}-{table_execution.id}-trigger"
+        unique_alias = f"{task_table.alias}-{table_execution.id}-{datetime.now().strftime('%Y%m%d%H%M%S')}-trigger"
         self.logger.debug(f"[{self.__class__.__name__}] Unique alias for task [{task_table.id}]: [{unique_alias}]")
         
-        schedule_execution_time = datetime.now() + timedelta(seconds=task_table.debounce_seconds)
+        schedule_execution_time = datetime.now() + timedelta(hours=task_table.debounce_seconds)
         schedule_expression = schedule_execution_time.strftime("cron(%M %H %d %m ? *)")
 
         payload = {
