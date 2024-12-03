@@ -10,7 +10,7 @@ class TaskTable(AbstractBase):
     task_executor_id = Column(Integer, ForeignKey('task_executor.id'), primary_key=True)
     alias = Column(String(255), primary_key=True)
     params = Column(JSON)
-    debbounce_seconds = Column(Integer, nullable=False, default=10)
+    debounce_seconds = Column(Integer, nullable=False, default=10)
     
     table = relationship("Tables", back_populates="task_table", foreign_keys=[table_id])
     task_executor = relationship("TaskExecutor", back_populates="task_table", foreign_keys=[task_executor_id])

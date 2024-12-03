@@ -105,7 +105,14 @@
                         "is_required": false
                     }
                 ],
-                "tasks": []
+                "tasks": [
+                    {
+                        "task_executor": "step_function_executor",
+                        "alias": "op_enriquecido_step_function_executor",
+                        "params": "{\"table_id\":\"{{ table.id }}\"}",
+                        "debounce_seconds": 30
+                    }
+                ]
             }
         ],   
         "user": "lrcxpnu"

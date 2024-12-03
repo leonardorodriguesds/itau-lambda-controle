@@ -3,6 +3,7 @@ from logging import Logger
 from typing import List, Optional
 
 from injector import inject
+from service.task_table_service import TaskTableService
 from service.table_execution_service import TableExecutionService
 from models.dto.table_dto import TableDTO
 from models.tables import Tables
@@ -14,13 +15,22 @@ from service.task_executor_service import TaskExecutorService
 
 class TableService:
     @inject
-    def __init__(self, logger: Logger, table_repository: TableRepository, dependency_service: DependencyService, partition_service: PartitionService, task_executor_service: TaskExecutorService, table_execution_service: TableExecutionService):
+    def __init__(
+        self, logger: Logger, 
+        table_repository: TableRepository, 
+        dependency_service: DependencyService, 
+        partition_service: PartitionService, 
+        task_executor_service: TaskExecutorService, 
+        table_execution_service: TableExecutionService,
+        task_table_service: TaskTableService
+    ):
         self.logger = logger
         self.table_repository = table_repository
         self.dependency_service = dependency_service
         self.partition_service = partition_service
         self.task_executor_service = task_executor_service
         self.table_execution_service = table_execution_service
+        self.task_table_service = task_table_service
 
     def save_multiple_tables(self, tables_dto: List[TableDTO], user: str):
         """
@@ -77,6 +87,9 @@ class TableService:
 
         self.partition_service.save_partitions(table.id, table_dto.partitions)
         self.dependency_service.save_dependencies(table.id, table_dto.dependencies)
+        
+        for task_dto in table_dto.tasks:
+            self.task_table_service.save(task_dto, table.id)
 
         return f"Table '{table.name}' saved successfully."
     

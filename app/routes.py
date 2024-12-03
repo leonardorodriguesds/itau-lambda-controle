@@ -8,7 +8,7 @@ from models.dto.table_dto import TableDTO, validate_tables
 from models.dto.table_partition_exec_dto import TablePartitionExecDTO
 from service.table_service import TableService
 from service.table_partition_exec_service import TablePartitionExecService
-from config.session_provider import SessionProvider
+from provider.session_provider import SessionProvider
 
 app = ApiGatewayResolver()
 

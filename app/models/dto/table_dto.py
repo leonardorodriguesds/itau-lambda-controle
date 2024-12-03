@@ -12,9 +12,12 @@ class DependencyDTO(BaseModel):
     is_required: bool = False
 
 class TaskDTO(BaseModel):
-    task_executor_id: int
+    id: Optional[int] = None
+    task_executor_id: Optional[int] = None
+    task_executor: Optional[str] = None
     alias: str
-    params: Optional[dict] = None
+    params: Optional[str] = None
+    debounce_seconds: Optional[int] = None
 
 class TableDTO(BaseModel):
     id: Optional[int] = None

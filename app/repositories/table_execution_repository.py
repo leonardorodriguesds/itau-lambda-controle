@@ -4,7 +4,7 @@ from injector import inject
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from config.session_provider import SessionProvider
+from provider.session_provider import SessionProvider
 from repositories.generic_repository import GenericRepository
 from models.table_execution import TableExecution
 

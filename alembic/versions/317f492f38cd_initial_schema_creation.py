@@ -86,14 +86,12 @@ def upgrade() -> None:
     )
     op.create_table(
         'task_executor',
-        sa.Column('id', mysql.INTEGER(), autoincrement=True, nullable=False),
-        sa.Column('alias', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=False),
-        sa.Column('description', mysql.TEXT(collation='utf8mb4_general_ci'), nullable=True),
-        sa.Column('method', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=False),  
-        sa.Column('sqs_arn', mysql.VARCHAR(collation='utf8mb4_general_ci', length=1024), nullable=True),  
-        sa.Column('stf_arn', mysql.VARCHAR(collation='utf8mb4_general_ci', length=1024), nullable=True),  
-        sa.Column('api_uri', mysql.VARCHAR(collation='utf8mb4_general_ci', length=1024), nullable=True), 
-        sa.Column('kafka_topic', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=True),  
+        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column('alias', sa.String(length=255, collation='utf8mb4_general_ci'), nullable=False),
+        sa.Column('description', sa.Text(collation='utf8mb4_general_ci'), nullable=True),
+        sa.Column('method', sa.String(length=255, collation='utf8mb4_general_ci'), nullable=False),
+        sa.Column('identification', sa.String(length=1024, collation='utf8mb4_general_ci'), nullable=True),
+        sa.Column('target_role_arn', sa.String(length=255, collation='utf8mb4_general_ci'), nullable=True),
         sa.Column('date_deleted', mysql.DATETIME(), nullable=True),
         sa.Column('deleted_by', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=True),  
         sa.Column('tenant_id', mysql.INTEGER(), nullable=False, server_default='1'),
@@ -102,11 +100,16 @@ def upgrade() -> None:
         mysql_default_charset='utf8mb4',
         mysql_engine='InnoDB'
     )
-    
     op.execute(
         """
-        INSERT INTO task_executor (alias, description, method, tenant_id)
-        VALUES ('step_function_executor', 'Chama uma stepfunction', 'stepfunction_process', 1)
+        INSERT INTO task_executor (alias, description, method, identification, target_role_arn)
+        VALUES (
+            'step_function_executor', 
+            'Chama uma stepfunction', 
+            'stepfunction_process', 
+            'arn:aws:lambda:us-east-1:000000000000:function:my-test-lambda', 
+            'arn:aws:iam::000000000000:role/service-role/test-role'
+        )
         """
     )
 

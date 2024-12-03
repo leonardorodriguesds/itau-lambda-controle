@@ -37,15 +37,6 @@
                     {"partition_name": "versao_processamento", "value": "1"}
                 ],
                 "source": "glue"
-            },
-            {
-                "table_name": "tbjf001_op_pdz_prep",
-                "partitions": [
-                    {"partition_name": "ano_mes_referencia", "value": "2405"},
-                    {"partition_name": "versao_processamento", "value": "3"},
-                    {"partition_name": "identificador_empresa", "value": "0"}
-                ],
-                "source": "glue"
             }
         ],
         "user": "lrcxpnu"

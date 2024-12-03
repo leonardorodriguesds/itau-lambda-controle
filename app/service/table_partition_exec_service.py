@@ -1,11 +1,9 @@
-from concurrent.futures import ThreadPoolExecutor
+import json
 from logging import Logger
-from threading import get_native_id
 from typing import Any, Dict, List
 from injector import inject
 from datetime import datetime
-from models.dependencies import Dependencies
-from service.task_service import TaskService
+from service.event_bridge_scheduler_service import EventBridgeSchedulerService
 from service.partition_service import PartitionService
 from service.table_service import TableService
 from service.table_execution_service import TableExecutionService
@@ -18,68 +16,33 @@ from repositories.table_partition_exec_repository import TablePartitionExecRepos
 
 class TablePartitionExecService:
     @inject
-    def __init__(self, logger: Logger, repository: TablePartitionExecRepository, table_service: TableService, table_execution_service: TableExecutionService, partition_service: PartitionService, task_service: TaskService):
+    def __init__(self, logger: Logger, repository: TablePartitionExecRepository, table_service: TableService, table_execution_service: TableExecutionService, partition_service: PartitionService, event_bridge_scheduler_service: EventBridgeSchedulerService):
         self.logger = logger
         self.repository = repository
         self.table_service = table_service
         self.table_execution_service = table_execution_service
         self.partition_service = partition_service
-        self.task_service = task_service
+        self.event_bridge_scheduler_service = event_bridge_scheduler_service
+        
+    def get_by_execution(self, execution_id: int) -> List[TablePartitionExec]:
+        return self.repository.get_by_execution(execution_id)
                 
     def trigger_tables(self, table_id: int, current_partitions: Dict[str, Any] = None):
         table = self.table_service.find(table_id=table_id)
-        self.logger.debug(f"[{self.__class__.__name__}] Triggering tables for: [{table.name}]")
+        self.logger.debug(f"[{self.__class__.__name__}] Registring events for tables for: [{table.name}]")
         tables: List[Tables] = self.table_service.find_by_dependency(table_id)
         
         last_execution: TableExecution = self.table_execution_service.get_latest_execution(table_id)
+        self.logger.debug(f"[{self.__class__.__name__}] Last execution for table [{table.name}]: [{last_execution.id}]")
         if not current_partitions:
             current_partitions = {
                 p.partition.name: p.value
                 for p in self.repository.get_by_execution(last_execution.id)
             }
-        
-        def process_table(table: Tables):
-            """
-            Processa cada tabela de forma independente dentro de uma thread.
-            """
-            thread_id = get_native_id() 
-            start_time = datetime.now() 
-            self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Processing table [{table.name}] in thread")
-            try:
-                def resolve_dependency(dependency: Dependencies) -> Dict[str, Any]:
-                    """
-                    Resolve as dependências recursivamente.
-                    """
-                    execution: TableExecution = self.table_execution_service.get_latest_execution_with_restrictions(dependency.id, current_partitions)
-                    if not execution:
-                        self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] No execution found for dependency [{dependency.dependency_table.name}]")
-                        return None
-                    self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Execution found for dependency [{dependency.dependency_table.name}]: [{execution.id}]")
-                    return {
-                        p.partition.name: p.value for p in self.repository.get_by_execution(execution.id)
-                    }
-                    
-                dependencies_partitions = {
-                    d.dependency_table.name: resolve_dependency(d) for d in table.dependencies
-                }
-
-                self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Dependencies partitions for table [{table.name}]: {dependencies_partitions}")
-                
-                for dep in table.dependencies:
-                    if dep.is_required and not dependencies_partitions[dep.dependency_table.name]:
-                        self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] No execution found for dependency [{dep}]")
-                        return
-                    
-                for task in table.task_table:
-                    self.task_service.process(task, table, last_execution, dependencies_partitions)
-            except Exception as e:
-                self.logger.error(f"[{self.__class__.__name__}][{thread_id}] Error processing table [{table.name}]: {e}")
-            finally:
-                end_time = datetime.now()
-                self.logger.debug(f"[{self.__class__.__name__}][{thread_id}] Table [{table.name}] processed in {end_time - start_time}")
-
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            executor.map(process_table, tables)      
+            
+        for table in tables:
+            for task in table.task_table:
+                self.event_bridge_scheduler_service.register_event(task, last_execution)
             
         
     def register_multiple_events(self, dtos: list[TablePartitionExecDTO]):

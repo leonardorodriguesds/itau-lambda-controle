@@ -1,18 +1,13 @@
 from logging import Logger
 from injector import inject
-from sqlalchemy.orm import Session
 from provider.session_provider import SessionProvider
-from config.constants import STATIC_SCHEDULE_PENDENT
 from models.task_schedule import TaskSchedule
 from repositories.generic_repository import GenericRepository
 
 
-class TaskScheduleRepository(GenericRepository[TaskSchedule]):
+class TaskTableRepository(GenericRepository[TaskSchedule]):
     @inject
     def __init__(self, session_provider: SessionProvider, logger: Logger):
         super().__init__(session_provider.get_session(), TaskSchedule, logger)
         self.session = session_provider.get_session()
         self.logger = logger
-        
-    def get_pendent_schedules(self):
-        return self.session.query(TaskSchedule).filter(TaskSchedule.status == STATIC_SCHEDULE_PENDENT).all()

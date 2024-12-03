@@ -2,7 +2,7 @@ from logging import Logger
 from typing import List
 from injector import inject
 from sqlalchemy.orm import Session
-from config.session_provider import SessionProvider
+from provider.session_provider import SessionProvider
 from repositories.generic_repository import GenericRepository
 from models.table_partition_exec import TablePartitionExec
 
