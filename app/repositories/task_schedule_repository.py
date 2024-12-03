@@ -16,3 +16,6 @@ class TaskScheduleRepository(GenericRepository[TaskSchedule]):
         
     def get_pendent_schedules(self):
         return self.session.query(TaskSchedule).filter(TaskSchedule.status == STATIC_SCHEDULE_PENDENT).all()
+    
+    def get_by_unique_alias_and_pendent(self, unique_alias):
+        return self.session.query(TaskSchedule).filter(TaskSchedule.unique_alias == unique_alias, TaskSchedule.status == STATIC_SCHEDULE_PENDENT).first()

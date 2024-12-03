@@ -28,28 +28,6 @@ class TableExecutionRepository(GenericRepository[TableExecution]):
             self.logger.error(f"Erro ao buscar última execução da tabela [{table_id}]: {str(e)}")
             raise
 
-    def create_execution(self, table_id: int, source: str):
-        """
-        Cria uma nova entrada na tabela TableExecution.
-        :param table_id: ID da tabela associada à execução.
-        :param source: Origem da execução.
-        :return: A instância de TableExecution criada.
-        """
-        try:
-            self.logger.debug(f"[{self.__class__.__name__}] create execution for table [{table_id}]")
-            new_execution = TableExecution(
-                table_id=table_id,
-                source=source
-            )
-            self.session.add(new_execution)
-            self.session.commit()
-            self.logger.info(f"Nova execução criada: {new_execution.id}")
-            return new_execution
-        except SQLAlchemyError as e:
-            self.session.rollback()
-            self.logger.error(f"Erro ao criar execução: {str(e)}")
-            raise
-
     def get_executions_by_table(self, table_id: int):
         """
         Retorna todas as execuções associadas a uma tabela.

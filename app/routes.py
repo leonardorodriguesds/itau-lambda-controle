@@ -45,13 +45,14 @@ def add_table(table_service: TableService, session_provider: SessionProvider, lo
         tables = [TableDTO(**item) for item in data]
         validate_tables(tables)
         message = table_service.save_multiple_tables(tables, user)
+        session_provider.commit()  
         return {"message": message}
     except Exception as e:
+        session_provider.rollback()  
         logger.exception(f"Error in add_table: {e}")
         return {"message": f"Error: {str(e)}"}
     finally:
         session_provider.close()
-
 
 @app.post("/update_table")
 @inject_dependencies
@@ -66,13 +67,14 @@ def update_table(table_service: TableService, session_provider: SessionProvider,
 
         table = TableDTO(**data)
         message = table_service.save_table(table, user)
+        session_provider.commit()  
         return {"message": message}
     except Exception as e:
+        session_provider.rollback() 
         logger.exception(f"Error in update_table: {e}")
         return {"message": f"Error: {str(e)}"}
     finally:
         session_provider.close()
-
 
 @app.post("/register_execution")
 @inject_dependencies
@@ -96,8 +98,10 @@ def register_execution(
             execution_dto = TablePartitionExecDTO(**data, user=user)
             message = table_partition_exec_service.register_partitions_exec(execution_dto)
 
+        session_provider.commit() 
         return {"message": message}
     except Exception as e:
+        session_provider.rollback() 
         logger.exception(f"Error in register_execution: {e}")
         return {"message": f"Error: {str(e)}"}
     finally:
