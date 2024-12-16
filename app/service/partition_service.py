@@ -24,6 +24,7 @@ class PartitionService:
                     table_id=table_id,
                     name=partition_data.name,
                     type=partition_data.type,
-                    is_required=partition_data.is_required
+                    is_required=partition_data.is_required,
+                    sync_column=partition_data.sync_column
                 )
                 self.repository.save(partition)

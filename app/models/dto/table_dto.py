@@ -4,7 +4,8 @@ from pydantic import BaseModel, validator
 class PartitionDTO(BaseModel):
     name: str
     type: str
-    is_required: bool
+    is_required: bool = False
+    sync_column: bool = False
 
 class DependencyDTO(BaseModel):
     dependency_id: Optional[int] = None

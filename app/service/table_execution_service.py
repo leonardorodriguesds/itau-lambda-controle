@@ -21,6 +21,10 @@ class TableExecutionService:
                 source=source
             )
         )
+        
+    def find(self, execution_id: int):
+        self.logger.debug(f"[{self.__class__.__name__}] Finding execution: [{execution_id}]")
+        return self.table_execution_repository.get_by_id(execution_id)
     
     def get_latest_execution(self, table_id: int):
         self.logger.debug(f"[{self.__class__.__name__}] Getting latest execution for table [{table_id}]")

@@ -54,7 +54,7 @@ class TableExecutionRepository(GenericRepository[TableExecution]):
         available_partition_keys_query = text("""
             SELECT DISTINCT p.name
             FROM partitions p
-            WHERE table_id = :table_id
+            WHERE table_id = :table_id AND sync_column = TRUE
         """)
 
         available_partition_keys = self.session.execute(available_partition_keys_query, {"table_id": table_id}).fetchall()

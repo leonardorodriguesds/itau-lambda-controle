@@ -84,27 +84,27 @@ class EventBridgeSchedulerService:
             raise
         return False
 
-    def register_or_postergate_event(self, task_table: TaskTable, trigger_execution: TableExecution, last_execution: TableExecution, partitions: Dict[str, Any]):
+    def register_or_postergate_event(self, task_table: TaskTable, trigger_execution: TableExecution, last_execution: TableExecution, table_last_execution: Dict[str, Any]):
         """
         Registra ou atualiza um evento no EventBridge para a execução da tarefa.
         """
         try:
-            unique_alias = self.generate_unique_alias(task_table, last_execution, partitions)
+            unique_alias = self.generate_unique_alias(task_table, last_execution, table_last_execution)
             self.logger.info(f"[{self.__class__.__name__}] Generated unique alias: {unique_alias}")
             possible_schedule = self.task_schedule_service.get_by_unique_alias_and_pendent(unique_alias)
 
             if possible_schedule and self.check_event_exists(possible_schedule.schedule_alias):
                 self.logger.info(f"[{self.__class__.__name__}] Found existing schedule for alias: {unique_alias}. Updating event.")
-                self.postergate_event(possible_schedule, trigger_execution, partitions)
+                self.postergate_event(possible_schedule.schedule_alias, possible_schedule, trigger_execution, table_last_execution)
             else:
                 self.logger.info(f"[{self.__class__.__name__}] No schedule found for alias: {unique_alias}. Registering new event.")
-                self.register_event(task_table, trigger_execution, partitions, unique_alias)
+                self.register_event(unique_alias, task_table, trigger_execution, table_last_execution)
 
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Error during register_or_postergate_event: {e}")
             raise
 
-    def register_event(self, task_table: TaskTable, trigger_execution: TableExecution, partitions: Dict[str, Any], unique_alias: str):
+    def register_event(self, unique_alias: str, task_table: TaskTable, trigger_execution: TableExecution, partitions: Dict[str, Any]):
         """
         Registra um novo evento no EventBridge.
         """
@@ -114,7 +114,7 @@ class EventBridgeSchedulerService:
             schedule_expression = schedule_execution_time.strftime("cron(%M %H %d %m ? *)")
 
             payload = self.build_event_payload(task_table, trigger_execution, partitions, unique_alias)
-            schedule_alias = f"{datetime.now().strftime('%Y%m%d%H%M%S')}{task_table.table.name}{task_table.id}"[:64]
+            schedule_alias = f"{schedule_execution_time.strftime('%Y%m%d%H%M%S')}-{task_table.id}"[:64]
 
             response = self.scheduler_client.create_schedule(
                 Name=schedule_alias,
@@ -140,19 +140,19 @@ class EventBridgeSchedulerService:
             self.logger.error(f"[{self.__class__.__name__}] Failed to register event: {e}")
             raise
 
-    def postergate_event(self, task_schedule: TaskSchedule, trigger_execution: TableExecution, partitions: Dict[str, Any]):
+    def postergate_event(self, schedule_alias: str, task_schedule: TaskSchedule, trigger_execution: TableExecution, partitions: Dict[str, Any]):
         """
         Atualiza um evento existente no EventBridge.
         """
         try:
-            self.logger.info(f"[{self.__class__.__name__}] Postergating event for schedule ID: {task_schedule.id}")
+            self.logger.info(f"[{self.__class__.__name__}] Postergating event for schedule ID: [{task_schedule.id}]: {schedule_alias} ({task_schedule.unique_alias})")	
             schedule_execution_time = datetime.now() + timedelta(seconds=task_schedule.task_table.debounce_seconds)
             schedule_expression = schedule_execution_time.strftime("cron(%M %H %d %m ? *)")
 
             payload = self.build_event_payload(task_schedule.task_table, trigger_execution, partitions, task_schedule.unique_alias)
 
             response = self.scheduler_client.update_schedule(
-                Name=task_schedule.schedule_alias,
+                Name=schedule_alias,
                 ScheduleExpression=schedule_expression,
                 FlexibleTimeWindow={'Mode': 'OFF'},
                 Target={
@@ -168,7 +168,7 @@ class EventBridgeSchedulerService:
                 "id": task_schedule.id,
                 "task_id": task_schedule.task_table.id,
                 "unique_alias": task_schedule.unique_alias,
-                "schedule_alias": task_schedule.schedule_alias,
+                "schedule_alias": schedule_alias,
                 "table_execution_id": trigger_execution.id,
                 "scheduled_execution_time": schedule_execution_time
             })

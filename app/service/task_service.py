@@ -3,6 +3,7 @@ from datetime import datetime
 from threading import get_native_id
 from injector import inject
 from jinja2 import Template
+from service.task_table_service import TaskTableService
 from service.cloud_watch_service import CloudWatchService
 from service.table_service import TableService
 from models.dependencies import Dependencies
@@ -20,79 +21,54 @@ from models.table_execution import TableExecution
 
 class TaskService:
     @inject
-    def __init__(self, logger: Logger, table_execution_service: TableExecutionService, table_service: TableService, table_partition_exec_service: TablePartitionExecService, cloudwatch_service: CloudWatchService):
+    def __init__(self, logger: Logger, table_execution_service: TableExecutionService, table_service: TableService, table_partition_exec_service: TablePartitionExecService, cloudwatch_service: CloudWatchService, task_table_service: TaskTableService):
         self.logger = logger
         self.table_execution_service = table_execution_service
         self.table_service = table_service
         self.table_partition_exec_service = table_partition_exec_service
         self.cloudwatch_service = cloudwatch_service
+        self.task_table_service = task_table_service
 
-    def trigger_tables(self, table_id: int, current_partitions: Dict[str, Any] = None):
+    def trigger_tables(self, task_table_id: int, dependency_execution_id: int, current_partitions: Dict[str, Any] = None):
         start_time = datetime.utcnow()
         error_count = 0
-
-        table = self.table_service.find(table_id=table_id)
-        self.logger.debug(f"[{self.__class__.__name__}] Triggering tables for: [{table.name}]")
-        tables: List[Tables] = self.table_service.find_by_dependency(table_id)
-
-        last_execution: TableExecution = self.table_execution_service.get_latest_execution(table_id)
-        if not current_partitions:
-            current_partitions = {
-                p.partition.name: p.value
-                for p in self.table_partition_exec_service.get_by_execution(last_execution.id)
+        self.logger.info(f"[{self.__class__.__name__}] Triggering task table [{task_table_id}] with partitions: {current_partitions}")
+        
+        task_table: TaskTable = self.task_table_service.find(task_id=task_table_id)
+        table: Tables = task_table.table
+        dependency_execution: TableExecution = self.table_execution_service.find(id=dependency_execution_id)
+        
+        def resolve_dependency(dependency: Dependencies) -> Dict[str, Any]:
+            execution: TableExecution = self.table_execution_service.get_latest_execution_with_restrictions(dependency.id, current_partitions)
+            if not execution:
+                self.logger.debug(f"[{self.__class__.__name__}][{table.name}] No execution found for dependency [{dependency.dependency_table.name}]")
+                return None
+            self.logger.debug(f"[{self.__class__.__name__}][{table.name}] Execution found for dependency [{dependency.dependency_table.name}]: [{execution.id}]")
+            return {
+                p.partition.name: p.value for p in self.table_partition_exec_service.get_by_execution(execution.id)
             }
 
-        def process_table(table: Tables):
-            thread_id = get_native_id()
-            start_time_table = datetime.utcnow()
-            self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Processing table [{table.name}] in thread")
-            try:
-                def resolve_dependency(dependency: Dependencies) -> Dict[str, Any]:
-                    execution: TableExecution = self.table_execution_service.get_latest_execution_with_restrictions(dependency.id, current_partitions)
-                    if not execution:
-                        self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] No execution found for dependency [{dependency.dependency_table.name}]")
-                        return None
-                    self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Execution found for dependency [{dependency.dependency_table.name}]: [{execution.id}]")
-                    return {
-                        p.partition.name: p.value for p in self.table_partition_exec_service.get_by_execution(execution.id)
-                    }
+        dependencies_partitions = {}
+        for dependency in table.dependencies:
+            resolved = resolve_dependency(dependency)
+            if resolved is None:
+                self.logger.debug(f"[{self.__class__.__name__}][{table.name}] Failed to resolve dependency [{dependency.dependency_table.name}]")
+                return
 
-                dependencies_partitions = {}
-                for dependency in table.dependencies:
-                    resolved = resolve_dependency(dependency)
-                    if resolved is None:
-                        self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Failed to resolve dependency [{dependency.dependency_table.name}]")
-                        return
+            dependencies_partitions[dependency.dependency_table.name] = resolved
 
-                    dependencies_partitions[dependency.dependency_table.name] = resolved
+        self.logger.debug(f"[{self.__class__.__name__}][{table.name}] Dependencies partitions for table [{table.name}]: {dependencies_partitions}")
 
-                self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] Dependencies partitions for table [{table.name}]: {dependencies_partitions}")
+        for dep in table.dependencies:
+            if dep.is_required and not dependencies_partitions[dep.dependency_table.name]:
+                self.logger.debug(f"[{self.__class__.__name__}][{table.name}] No execution found for dependency [{dep}]")
+                return
 
-                for dep in table.dependencies:
-                    if dep.is_required and not dependencies_partitions[dep.dependency_table.name]:
-                        self.logger.debug(f"[{self.__class__.__name__}][{thread_id}][{table.name}] No execution found for dependency [{dep}]")
-                        return
-
-                for task in table.task_table:
-                    self.process(task, last_execution, dependencies_partitions)
-
-            except Exception as e:
-                self.logger.error(f"[{self.__class__.__name__}][{thread_id}] Error processing table [{table.name}]: {e}")
-            finally:
-                total_execution_time_table = (datetime.utcnow() - start_time_table).total_seconds() * 1000
-                self.cloudwatch_service.add_metric(name="ProcessTableExecutionTime", value=total_execution_time_table, unit="Milliseconds")
-                self.logger.debug(f"[{self.__class__.__name__}][{thread_id}] Table [{table.name}] processed in {total_execution_time_table}ms")
-
-        try:
-            with ThreadPoolExecutor(max_workers=5) as executor:
-                executor.map(process_table, tables)
-        except Exception as e:
-            self.logger.error(f"[{self.__class__.__name__}] Error in trigger_tables: {e}")
-            error_count += 1
-        finally:
-            total_execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
-            self.cloudwatch_service.add_metric(name="TriggerTablesExecutionTime", value=total_execution_time, unit="Milliseconds")
-            self.cloudwatch_service.add_metric(name="TriggerTablesErrorCount", value=error_count, unit="Count")  
+        self.process(task_table, dependency_execution, dependencies_partitions)
+        
+        total_execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+        self.cloudwatch_service.add_metric(name="TriggerTablesExecutionTime", value=total_execution_time, unit="Milliseconds")
+        self.cloudwatch_service.add_metric(name="TriggerTablesErrorCount", value=error_count, unit="Count")  
 
     def process(self, task_table: TaskTable, execution: TableExecution, dependencies_executions: Dict[str, Dict[str, Any]]):
         self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Processing task: [{task_table.alias}] for execution: [{execution.id}]")
@@ -172,6 +148,7 @@ class TaskService:
 
         try:
             payload_str = json.dumps(payload)
+            self.logger.debug(f"[{self.__class__.__name__}] Payload JSON: {payload_str}")
             template = Template(payload_str)
 
             context = {

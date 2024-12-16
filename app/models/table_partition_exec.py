@@ -6,6 +6,7 @@ from .base import AbstractBase
 class TablePartitionExec(AbstractBase):
     __tablename__ = 'table_partition_exec'
     
+    id = Column(Integer, primary_key=True, autoincrement=True)
     table_id = Column(Integer, ForeignKey('tables.id'), nullable=False)
     partition_id = Column(Integer, ForeignKey('partitions.id'), nullable=False)
     value = Column(String(255), nullable=False)
@@ -18,6 +19,4 @@ class TablePartitionExec(AbstractBase):
     partition = relationship("Partitions", back_populates="table_partition_execs")
     execution = relationship("TableExecution", back_populates="table_partition_execs") 
     
-    __mapper_args__ = {
-        "primary_key": [table_id, partition_id, value, execution_id]
-    }
+    __unique_constraint__ = ('table_id', 'partition_id', 'value', 'execution_id')

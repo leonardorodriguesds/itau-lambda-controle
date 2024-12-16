@@ -120,7 +120,8 @@ def upgrade() -> None:
         sa.Column('table_id', mysql.INTEGER(), autoincrement=False, nullable=False),
         sa.Column('name', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=False),
         sa.Column('type', mysql.VARCHAR(collation='utf8mb4_general_ci', length=50), nullable=False),
-        sa.Column('is_required', mysql.TINYINT(display_width=1), autoincrement=False, nullable=False),
+        sa.Column('is_required', mysql.TINYINT(display_width=1), autoincrement=False, nullable=False, default=0),
+        sa.Column('sync_column', mysql.TINYINT(display_width=1), autoincrement=False, nullable=False, default=0),
         sa.Column('date_deleted', mysql.DATETIME(), nullable=True),
         sa.Column('deleted_by', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=True),  
         sa.Column('tenant_id', mysql.INTEGER(), nullable=False, server_default='1'),
@@ -190,6 +191,7 @@ def upgrade() -> None:
     
     op.create_table(
         'table_partition_exec',
+        sa.Column('id', mysql.INTEGER(), autoincrement=True, nullable=False),
         sa.Column('table_id', mysql.INTEGER(), autoincrement=False, nullable=False),
         sa.Column('partition_id', mysql.INTEGER(), autoincrement=False, nullable=False),
         sa.Column('value', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=False),
@@ -203,7 +205,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['partition_id'], ['partitions.id'], name='fk_partition', ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['table_id'], ['tables.id'], name='fk_table', ondelete='CASCADE'),
         sa.ForeignKeyConstraint(['execution_id'], ['table_execution.id'], name='fk_execution', ondelete='CASCADE'),  
-        sa.PrimaryKeyConstraint('table_id', 'partition_id', 'value', 'execution_id'),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('table_id', 'partition_id', 'value', 'execution_id'),
         mysql_collate='utf8mb4_general_ci',
         mysql_default_charset='utf8mb4',
         mysql_engine='InnoDB'    )

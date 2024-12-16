@@ -160,10 +160,11 @@ def trigger_event(task_service: TaskService, logger: Logger, session_provider: S
 
     table_id = payload["task_table"]["id"]
     partitions = payload.get("partitions", {})
+    dependency_execution_id = payload["execution"]["id"]
 
     logger.info(f"Processing trigger for table ID: {table_id} with partitions: {partitions}")
 
-    task_service.trigger_tables(table_id=table_id, partitions=partitions)
+    task_service.trigger_tables(table_id=table_id, dependency_execution_id=dependency_execution_id, current_partitions=partitions)
 
     logger.info(f"Trigger processed successfully for table ID: {table_id}")
     return {"message": "Trigger processed successfully."}
