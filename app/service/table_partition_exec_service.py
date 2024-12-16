@@ -45,9 +45,19 @@ class TablePartitionExecService:
             }
 
             for table in tables:
+                execution: TableExecution = self.table_execution_service.get_latest_execution_with_restrictions(table.id, current_partitions)
+
+                table_last_execution = {}
+
+                if execution:
+                    table_last_execution = {
+                        p.partition.name: p.value
+                        for p in self.repository.get_by_execution(execution.id)
+                    }
+
                 for task in table.task_table:
                     self.logger.debug(f"[{self.__class__.__name__}] Registering or postponing event for task [{task.id}] in table [{table.name}]")
-                    self.event_bridge_scheduler_service.register_or_postergate_event(task, last_execution, current_partitions)
+                    self.event_bridge_scheduler_service.register_or_postergate_event(task, last_execution, execution, table_last_execution)
 
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Error triggering tables: {str(e)}")
