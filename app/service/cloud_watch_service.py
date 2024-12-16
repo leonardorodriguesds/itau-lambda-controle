@@ -13,7 +13,7 @@ class CloudWatchService:
     @inject
     def __init__(self, logger: logging.Logger):
         self.logger = logger
-        self.metrics = Metrics()
+        self.metrics = Metrics(namespace="LambdaControleItau")
         self._metric_data = []
 
     def add_metric(self, name: str, value: float, unit: MetricUnit = MetricUnit.Count):

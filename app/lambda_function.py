@@ -7,10 +7,7 @@ from service.cloud_watch_service import CloudWatchService
 from routes import app, inject_dependencies
 
 @inject_dependencies
-def lambda_handler(event, context: LambdaContext, cloudwatch_service: CloudWatchService):
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-
+def lambda_handler(event, context: LambdaContext, cloudwatch_service: CloudWatchService, logger: logging.Logger):
     start_time = time.time()
     error_count = 0
     route_called = event.get('path', 'unknown')
@@ -37,7 +34,7 @@ def lambda_handler(event, context: LambdaContext, cloudwatch_service: CloudWatch
     return response
 
 @inject_dependencies
-def main(logger: logging.Logger, cloudwatch_service: CloudWatchService):
+def main(logger: logging.Logger):
     parser = argparse.ArgumentParser(
         description="CLI para executar a função lambda_handler com um payload JSON."
     )
@@ -64,17 +61,16 @@ def main(logger: logging.Logger, cloudwatch_service: CloudWatchService):
             event["body"] = json.dumps(event["body"])
 
     except FileNotFoundError:
-        print(f"Erro: O arquivo '{args.file}' não foi encontrado.")
+        logger.error(f"Erro: O arquivo '{args.file}' não foi encontrado.")
         return
     except json.JSONDecodeError:
-        print("Erro: Formato JSON inválido.")
+        logger.error("Erro: Formato JSON inválido.")
         return
 
-    context = None
-    response = lambda_handler(event, context, cloudwatch_service)
+    response = lambda_handler(event)
 
-    print("Resposta da Lambda:")
-    print(json.dumps(response, indent=2))
+    logger.info("Resposta da Lambda:")
+    logger.info(json.dumps(response, indent=2))
 
 
 if __name__ == "__main__":

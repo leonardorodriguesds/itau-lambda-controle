@@ -31,19 +31,6 @@ class TableService:
         self.task_executor_service = task_executor_service
         self.table_execution_service = table_execution_service
         self.task_table_service = task_table_service
-
-    def save_multiple_tables(self, tables_dto: List[TableDTO], user: str):
-        """
-        Salva múltiplas tabelas em uma transação única. 
-        Apenas comita se todas as tabelas forem salvas com sucesso.
-        """
-        self.logger.debug(f"[{self.__class__.__name__}] Saving multiple tables: [{tables_dto}]")
-        try:
-            for table_dto in tables_dto:
-                self.save_table(table_dto, user)
-            return "All tables saved successfully."
-        except Exception as e:
-            raise TableInsertError(f"[{self.__class__.__name__}] Error saving multiple tables: {str(e)}")
         
     def find(self, table_id: Optional[str] = None, table_name: Optional[str] = None):
         self.logger.debug(f"[{self.__class__.__name__}] Finding table: [{table_id}] [{table_name}]")
@@ -84,14 +71,19 @@ class TableService:
                 requires_approval=table_dto.requires_approval
             )
             self.table_repository.save(table)
+            
+            self.table_repository.session.flush()  
+
+        self.logger.debug(f"[{self.__class__.__name__}] Table ID after flush: {table.id}")
 
         self.partition_service.save_partitions(table.id, table_dto.partitions)
         self.dependency_service.save_dependencies(table.id, table_dto.dependencies)
         
         for task_dto in table_dto.tasks:
-            self.task_table_service.save(task_dto, table.id)
+           self.task_table_service.save(task_dto, table.id)
 
         return f"Table '{table.name}' saved successfully."
+
     
     def get_latest(self, table_id: Optional[str], table_name: Optional[str]):
         self.logger.debug(f"[{self.__class__.__name__}] Getting latest execution for table: [{table_id}] [{table_name}]")

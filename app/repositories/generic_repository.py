@@ -8,7 +8,8 @@ T = TypeVar('T')
 
 class GenericRepository(Generic[T]):
     """
-    Classe genérica de repositório para operações CRUD.
+    Repositório genérico para operações CRUD.
+    O controle de commit e rollback deve ser gerenciado externamente.
     """
     def __init__(self, db_session: Session, model: Type[T], logger: Logger):
         """
@@ -31,13 +32,15 @@ class GenericRepository(Generic[T]):
         """
         try:
             self.logger.debug(f"[{self.__class__.__name__}] Saving object: [{obj.__dict__}]")
-            obj = self.db_session.merge(obj)  
-            self.db_session.commit()
-            self.db_session.refresh(obj)
+            if not obj.id:  
+                self.db_session.add(obj)  
+            else: 
+                obj = self.db_session.merge(obj)  
+            self.db_session.flush()  
+            self.logger.debug(f"[{self.__class__.__name__}] Object ID after flush: {obj.id}")
             return obj
         except Exception as e:
             self.logger.error(f"Error saving object: {e}")
-            self.db_session.rollback()
             raise
 
     def get_by_id(self, obj_id: int) -> Optional[T]:
@@ -71,24 +74,6 @@ class GenericRepository(Generic[T]):
             self.logger.error(f"Error fetching all objects: {e}")
             raise
 
-    def add(self, obj: T) -> T:
-        """
-        Adiciona um novo objeto ao banco de dados.
-
-        :param obj: Objeto a ser adicionado.
-        :return: Objeto adicionado.
-        """
-        try:
-            self.logger.debug(f"[{self.__class__.__name__}] Adding object: [{obj.__dict__}]")
-            self.db_session.add(obj)
-            self.db_session.commit()
-            self.db_session.refresh(obj)
-            return obj
-        except Exception as e:
-            self.logger.error(f"Error adding object: {e}")
-            self.db_session.rollback()
-            raise
-
     def update(self, obj_id: int, updated_data: dict) -> Optional[T]:
         """
         Atualiza um objeto pelo ID.
@@ -104,16 +89,13 @@ class GenericRepository(Generic[T]):
                 self.logger.warning(f"Object with ID [{obj_id}] not found for update.")
                 return None
 
-            obj = self.db_session.merge(obj)
-
             for key, value in updated_data.items():
                 setattr(obj, key, value)
-            self.db_session.commit()
-            self.db_session.refresh(obj)
+            obj = self.db_session.merge(obj)  
+            self.db_session.flush()
             return obj
         except Exception as e:
             self.logger.error(f"Error updating object with ID [{obj_id}]: {e}")
-            self.db_session.rollback()
             raise
 
     def hard_delete(self, obj_id: int) -> bool:
@@ -129,12 +111,10 @@ class GenericRepository(Generic[T]):
             if not obj:
                 self.logger.warning(f"Object with ID [{obj_id}] not found for hard delete.")
                 return False
-            self.db_session.delete(obj)
-            self.db_session.commit()
+            self.db_session.delete(obj) 
             return True
         except Exception as e:
             self.logger.error(f"Error hard deleting object with ID [{obj_id}]: {e}")
-            self.db_session.rollback()
             raise
 
     def soft_delete(self, obj_id: int) -> bool:
@@ -151,12 +131,27 @@ class GenericRepository(Generic[T]):
                 self.logger.warning(f"Object with ID [{obj_id}] not found for soft delete.")
                 return False
 
-            obj = self.db_session.merge(obj)
-
             obj.date_deleted = datetime.now()
-            self.db_session.commit()
+            obj = self.db_session.merge(obj) 
+            self.db_session.flush()
             return True
         except Exception as e:
             self.logger.error(f"Error soft deleting object with ID [{obj_id}]: {e}")
-            self.db_session.rollback()
+            raise
+
+    def query(self, **filters) -> List[T]:
+        """
+        Consulta objetos no banco de dados com base em filtros dinâmicos.
+
+        :param filters: Dicionário de filtros para consulta.
+        :return: Lista de objetos que atendem aos filtros.
+        """
+        try:
+            self.logger.debug(f"[{self.__class__.__name__}] Querying objects with filters: {filters}")
+            query = self.db_session.query(self.model)
+            for attr, value in filters.items():
+                query = query.filter(getattr(self.model, attr) == value)
+            return query.all()
+        except Exception as e:
+            self.logger.error(f"Error querying objects: {e}")
             raise

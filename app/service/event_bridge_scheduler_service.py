@@ -3,24 +3,20 @@ import json
 import re
 from logging import Logger
 from typing import Any, Dict
-from botocore.session import Session
 from injector import inject
 
-from service.task_service import TaskService
 from service.task_schedule_service import TaskScheduleService
 from service.boto_service import BotoService
 from models.table_execution import TableExecution
-from models.task_executor import TaskExecutor
 from models.task_table import TaskTable
 from models.task_schedule import TaskSchedule
 
 class EventBridgeSchedulerService:
     @inject
-    def __init__(self, logger: Logger, boto_service: BotoService, task_schedule_service: TaskScheduleService, task_service: TaskService):
+    def __init__(self, logger: Logger, boto_service: BotoService, task_schedule_service: TaskScheduleService):
         self.logger = logger
         self.scheduler_client = boto_service.get_client('scheduler')
         self.task_schedule_service: TaskScheduleService = task_schedule_service
-        self.task_service: TaskService = task_service
 
     @staticmethod
     def dict_to_clean_string(input_dict: Dict[str, Any]) -> str:
@@ -66,25 +62,27 @@ class EventBridgeSchedulerService:
                 "debounce_seconds": task_table.debounce_seconds,
             }
         }
-    def process_trigger_payload(self, payload: Dict[str, Any]):
+        
+    def check_event_exists(self, schedule_alias: str) -> bool:
         """
-        Processa o payload da rota /trigger e executa a tabela com as partições especificadas.
+        Verifica se um evento existe no EventBridge Scheduler.
+        
+        :param schedule_alias: O alias do agendamento a ser verificado.
+        :return: True se o evento existir, False caso contrário.
         """
         try:
-            table_id = payload["task_table"]["id"]
-            partitions = payload.get("partitions", {})
-
-            self.logger.info(f"[{self.__class__.__name__}] Processing trigger for table ID: {table_id} with partitions: {partitions}")
-
-            self.task_service.trigger_tables(table_id=table_id, partitions=partitions)
-
-            self.logger.info(f"[{self.__class__.__name__}] Trigger processed successfully for table ID: {table_id}")
-        except KeyError as e:
-            self.logger.error(f"[{self.__class__.__name__}] Missing key in trigger payload: {e}")
-            raise
+            response = self.scheduler_client.list_schedules(NamePrefix=schedule_alias)
+            schedules = response.get("Schedules", [])
+            for schedule in schedules:
+                if schedule.get("Name") == schedule_alias:
+                    self.logger.info(f"[{self.__class__.__name__}] Event with alias '{schedule_alias}' exists.")
+                    return True
+        except self.scheduler_client.exceptions.ResourceNotFoundException:
+            self.logger.info(f"[{self.__class__.__name__}] Event with alias '{schedule_alias}' does not exist.")
         except Exception as e:
-            self.logger.error(f"[{self.__class__.__name__}] Error processing trigger payload: {e}")
+            self.logger.error(f"[{self.__class__.__name__}] Error checking event existence: {e}")
             raise
+        return False
 
     def register_or_postergate_event(self, task_table: TaskTable, trigger_execution: TableExecution, last_execution: TableExecution, partitions: Dict[str, Any]):
         """
@@ -95,7 +93,7 @@ class EventBridgeSchedulerService:
             self.logger.info(f"[{self.__class__.__name__}] Generated unique alias: {unique_alias}")
             possible_schedule = self.task_schedule_service.get_by_unique_alias_and_pendent(unique_alias)
 
-            if possible_schedule:
+            if possible_schedule and self.check_event_exists(possible_schedule.schedule_alias):
                 self.logger.info(f"[{self.__class__.__name__}] Found existing schedule for alias: {unique_alias}. Updating event.")
                 self.postergate_event(possible_schedule, trigger_execution, partitions)
             else:

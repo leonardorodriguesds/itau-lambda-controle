@@ -1,6 +1,5 @@
-import json
 from logging import Logger
-from typing import Any, Dict, List
+from typing import List
 from injector import inject
 from datetime import datetime
 from service.cloud_watch_service import CloudWatchService
@@ -68,26 +67,6 @@ class TablePartitionExecService:
             total_execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
             self.cloudwatch_service.add_metric(name="TriggerTablesExecutionTime", value=total_execution_time, unit="Milliseconds")
             self.cloudwatch_service.add_metric(name="TriggerTablesErrorCount", value=error_count, unit="Count")
-
-    def register_multiple_events(self, dtos: list[TablePartitionExecDTO]):
-        """
-        Registra múltiplos eventos de execução de partições para tabelas.
-        """
-        error_count = 0
-
-        try:
-            for dto in dtos:
-                self.logger.debug(f"[{self.__class__.__name__}] Registering DTO: {dto}")
-                self.register_partitions_exec(dto)
-            return {"message": f"{len(dtos)} eventos registrados com sucesso."}
-
-        except Exception as e:
-            self.logger.error(f"[{self.__class__.__name__}] Error registering multiple events: {str(e)}")
-            error_count += 1
-            raise TableInsertError(f"Erro ao registrar múltiplos eventos: {str(e)}")
-
-        finally:
-            self.cloudwatch_service.add_metric(name="RegisterMultipleEventsErrorCount", value=error_count, unit="Count")
 
     def register_partitions_exec(self, dto: TablePartitionExecDTO):
         """
