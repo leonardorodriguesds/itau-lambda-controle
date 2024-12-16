@@ -3,6 +3,7 @@ from logging import Logger
 from typing import Callable
 from inspect import signature
 from aws_lambda_powertools.event_handler import ApiGatewayResolver
+from app.service.event_bridge_scheduler_service import EventBridgeSchedulerService
 from config.config import injector
 from models.dto.table_dto import TableDTO, validate_tables
 from models.dto.table_partition_exec_dto import TablePartitionExecDTO
@@ -106,3 +107,18 @@ def register_execution(
         return {"message": f"Error: {str(e)}"}
     finally:
         session_provider.close()
+        
+@app.post("/trigger")
+def trigger_event(
+    event_bridge_scheduler_service: EventBridgeSchedulerService, 
+    logger: Logger
+):
+    try:
+        payload = app.current_event.json_body
+
+        event_bridge_scheduler_service.process_trigger_payload(payload)
+
+        return {"message": "Trigger processed successfully."}
+    except Exception as e:
+        logger.error(f"Error in /trigger route: {e}")
+        return {"message": f"Failed to process trigger: {str(e)}"}, 500

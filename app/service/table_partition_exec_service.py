@@ -3,6 +3,7 @@ from logging import Logger
 from typing import Any, Dict, List
 from injector import inject
 from datetime import datetime
+from service.cloud_watch_service import CloudWatchService
 from service.event_bridge_scheduler_service import EventBridgeSchedulerService
 from service.partition_service import PartitionService
 from service.table_service import TableService
@@ -16,55 +17,77 @@ from repositories.table_partition_exec_repository import TablePartitionExecRepos
 
 class TablePartitionExecService:
     @inject
-    def __init__(self, logger: Logger, repository: TablePartitionExecRepository, table_service: TableService, table_execution_service: TableExecutionService, partition_service: PartitionService, event_bridge_scheduler_service: EventBridgeSchedulerService):
+    def __init__(self, logger: Logger, repository: TablePartitionExecRepository, table_service: TableService, table_execution_service: TableExecutionService, partition_service: PartitionService, event_bridge_scheduler_service: EventBridgeSchedulerService, cloudwatch_service: CloudWatchService):
         self.logger = logger
         self.repository = repository
         self.table_service = table_service
         self.table_execution_service = table_execution_service
         self.partition_service = partition_service
         self.event_bridge_scheduler_service = event_bridge_scheduler_service
-        
+        self.cloudwatch_service = cloudwatch_service
+
     def get_by_execution(self, execution_id: int) -> List[TablePartitionExec]:
         return self.repository.get_by_execution(execution_id)
-                
+
     def trigger_tables(self, table_id: int):
-        table = self.table_service.find(table_id=table_id)
-        self.logger.debug(f"[{self.__class__.__name__}] Registring events for tables for: [{table.name}]")
-        tables: List[Tables] = self.table_service.find_by_dependency(table_id)
-        
-        last_execution: TableExecution = self.table_execution_service.get_latest_execution(table_id)
-        self.logger.debug(f"[{self.__class__.__name__}] Last execution for table [{table.name}]: [{last_execution.id}]")
-        current_partitions = {
-            p.partition.name: p.value
-            for p in self.repository.get_by_execution(last_execution.id)
-        }
-            
-        for table in tables:
-            execution: TableExecution = self.table_execution_service.get_latest_execution_with_restrictions(table.id, current_partitions)
-            
-            table_target_partitions = {}
-            
-            if execution:
-                table_target_partitions = {
-                    p.partition.name: p.value
-                    for p in self.repository.get_by_execution(execution.id)
-                }
-            
-            for task in table.task_table:
-                self.event_bridge_scheduler_service.register_or_postergate_event(task, last_execution, execution, table_target_partitions)
-            
-        
+        start_time = datetime.utcnow()
+        error_count = 0
+
+        try:
+            table = self.table_service.find(table_id=table_id)
+            self.logger.debug(f"[{self.__class__.__name__}] Triggering tables for: [{table.name}]")
+            tables: List[Tables] = self.table_service.find_by_dependency(table_id)
+
+            last_execution: TableExecution = self.table_execution_service.get_latest_execution(table_id)
+            self.logger.debug(f"[{self.__class__.__name__}] Last execution ID for table [{table.name}]: [{last_execution.id}]")
+            current_partitions = {
+                p.partition.name: p.value
+                for p in self.repository.get_by_execution(last_execution.id)
+            }
+
+            for table in tables:
+                execution: TableExecution = self.table_execution_service.get_latest_execution_with_restrictions(table.id, current_partitions)
+
+                table_target_partitions = {}
+
+                if execution:
+                    table_target_partitions = {
+                        p.partition.name: p.value
+                        for p in self.repository.get_by_execution(execution.id)
+                    }
+
+                for task in table.task_table:
+                    self.logger.debug(f"[{self.__class__.__name__}] Registering or postponing event for task [{task.id}] in table [{table.name}]")
+                    self.event_bridge_scheduler_service.register_or_postergate_event(task, last_execution, execution, table_target_partitions)
+
+        except Exception as e:
+            self.logger.error(f"[{self.__class__.__name__}] Error triggering tables: {str(e)}")
+            error_count += 1
+
+        finally:
+            total_execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            self.cloudwatch_service.add_metric(name="TriggerTablesExecutionTime", value=total_execution_time, unit="Milliseconds")
+            self.cloudwatch_service.add_metric(name="TriggerTablesErrorCount", value=error_count, unit="Count")
+
     def register_multiple_events(self, dtos: list[TablePartitionExecDTO]):
         """
         Registra múltiplos eventos de execução de partições para tabelas.
         """
+        error_count = 0
+
         try:
             for dto in dtos:
+                self.logger.debug(f"[{self.__class__.__name__}] Registering DTO: {dto}")
                 self.register_partitions_exec(dto)
             return {"message": f"{len(dtos)} eventos registrados com sucesso."}
 
         except Exception as e:
+            self.logger.error(f"[{self.__class__.__name__}] Error registering multiple events: {str(e)}")
+            error_count += 1
             raise TableInsertError(f"Erro ao registrar múltiplos eventos: {str(e)}")
+
+        finally:
+            self.cloudwatch_service.add_metric(name="RegisterMultipleEventsErrorCount", value=error_count, unit="Count")
 
     def register_partitions_exec(self, dto: TablePartitionExecDTO):
         """
@@ -75,8 +98,12 @@ class TablePartitionExecService:
         3. Todas as partições fornecidas devem estar associadas à tabela.
         4. Atualiza automaticamente a versão mais recente para cada conjunto `table x partition`.
         """
-        self.logger.debug(f"[{self.__class__.__name__}] Registering partitions exec for: {dto}")
+        start_time = datetime.utcnow()
+        error_count = 0
+
         try:
+            self.logger.debug(f"[{self.__class__.__name__}] Registering partitions exec for DTO: {dto}")
+
             table = None
             if dto.table_id:
                 table = self.table_service.find(table_id=dto.table_id)
@@ -140,9 +167,16 @@ class TablePartitionExecService:
                 )
                 self.repository.save(new_entry)
 
+            self.logger.debug(f"[{self.__class__.__name__}] Triggering dependent tables for execution ID: {new_execution.id}")
             self.trigger_tables(new_execution.table_id)
             return {"message": "Table partition execution entries registered successfully."}
 
         except Exception as e:
+            self.logger.error(f"[{self.__class__.__name__}] Error registering partition executions: {str(e)}")
+            error_count += 1
             raise TableInsertError(f"Erro ao registrar execuções de partições: {str(e)}")
 
+        finally:
+            total_execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            self.cloudwatch_service.add_metric(name="RegisterPartitionsExecTime", value=total_execution_time, unit="Milliseconds")
+            self.cloudwatch_service.add_metric(name="RegisterPartitionsErrorCount", value=error_count, unit="Count")

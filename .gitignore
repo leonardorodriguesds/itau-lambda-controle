@@ -9,3 +9,4 @@ __pycache__/
 outputfile.txt
 .vscode/launch.json
 outputfile.txt
+.env

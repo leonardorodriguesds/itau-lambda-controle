@@ -1,14 +1,43 @@
 import json
 import argparse
 import logging
+import time
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from service.cloud_watch_service import CloudWatchService
 from routes import app, inject_dependencies
 
-def lambda_handler(event, context: LambdaContext):
-    return app.resolve(event, context)
+@inject_dependencies
+def lambda_handler(event, context: LambdaContext, cloudwatch_service: CloudWatchService):
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    start_time = time.time()
+    error_count = 0
+    route_called = event.get('path', 'unknown')
+
+    try:
+        logger.info(f"Processing event on route: {route_called}")
+
+        response = app.resolve(event, context)
+
+    except Exception as e:
+        logger.error(f"Error processing event: {str(e)}")
+        response = {"message": "Error processing event", "error": str(e)}
+        error_count += 1
+
+    finally:
+        total_execution_time = time.time() - start_time
+
+        cloudwatch_service.add_metric(name="ExecutionTime", value=total_execution_time, unit="Milliseconds")
+        cloudwatch_service.add_metric(name="ErrorCount", value=error_count, unit="Count")
+        cloudwatch_service.add_metric(name="RouteCalled", value=1, unit="Count")  
+
+        cloudwatch_service.flush_metrics()
+
+    return response
 
 @inject_dependencies
-def main(logger: logging.Logger):
+def main(logger: logging.Logger, cloudwatch_service: CloudWatchService):
     parser = argparse.ArgumentParser(
         description="CLI para executar a função lambda_handler com um payload JSON."
     )
@@ -26,7 +55,7 @@ def main(logger: logging.Logger):
 
     args = parser.parse_args()
     logger.setLevel(logging.DEBUG if args.verbose else logging.INFO)
-    
+
     try:
         with open(args.file, "r") as file:
             event = json.load(file)
@@ -42,7 +71,7 @@ def main(logger: logging.Logger):
         return
 
     context = None
-    response = lambda_handler(event, context)
+    response = lambda_handler(event, context, cloudwatch_service)
 
     print("Resposta da Lambda:")
     print(json.dumps(response, indent=2))
