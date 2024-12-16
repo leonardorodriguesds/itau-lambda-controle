@@ -56,7 +56,7 @@ class GenericRepository(Generic[T]):
                 and_(self.model.id == obj_id, self.model.date_deleted.is_(None))
             ).first()
         except Exception as e:
-            self.logger.error(f"Error fetching object by ID [{obj_id}]: {e}")
+            self.logger.error(f"[{self.__class__.__name__}] Error fetching object by ID [{obj_id}]: {e}")
             raise
 
     def get_all(self) -> List[T]:
@@ -71,7 +71,7 @@ class GenericRepository(Generic[T]):
                 self.model.date_deleted.is_(None)
             ).all()
         except Exception as e:
-            self.logger.error(f"Error fetching all objects: {e}")
+            self.logger.error(f"[{self.__class__.__name__}] Error fetching all objects: {e}")
             raise
 
     def update(self, obj_id: int, updated_data: dict) -> Optional[T]:
@@ -86,7 +86,7 @@ class GenericRepository(Generic[T]):
             self.logger.debug(f"[{self.__class__.__name__}] Updating object with ID [{obj_id}]: [{updated_data}]")
             obj = self.get_by_id(obj_id)
             if not obj:
-                self.logger.warning(f"Object with ID [{obj_id}] not found for update.")
+                self.logger.warning(f"[{self.__class__.__name__}] Object with ID [{obj_id}] not found for update.")
                 return None
 
             for key, value in updated_data.items():
@@ -95,7 +95,7 @@ class GenericRepository(Generic[T]):
             self.db_session.flush()
             return obj
         except Exception as e:
-            self.logger.error(f"Error updating object with ID [{obj_id}]: {e}")
+            self.logger.error(f"[{self.__class__.__name__}] Error updating object with ID [{obj_id}]: {e}")
             raise
 
     def hard_delete(self, obj_id: int) -> bool:
@@ -109,12 +109,12 @@ class GenericRepository(Generic[T]):
             self.logger.debug(f"[{self.__class__.__name__}] Hard deleting object with ID [{obj_id}]")
             obj = self.get_by_id(obj_id)
             if not obj:
-                self.logger.warning(f"Object with ID [{obj_id}] not found for hard delete.")
+                self.logger.warning(f"[{self.__class__.__name__}] Object with ID [{obj_id}] not found for hard delete.")
                 return False
             self.db_session.delete(obj) 
             return True
         except Exception as e:
-            self.logger.error(f"Error hard deleting object with ID [{obj_id}]: {e}")
+            self.logger.error(f"[{self.__class__.__name__}] Error hard deleting object with ID [{obj_id}]: {e}")
             raise
 
     def soft_delete(self, obj_id: int) -> bool:
@@ -128,7 +128,7 @@ class GenericRepository(Generic[T]):
             self.logger.debug(f"[{self.__class__.__name__}] Soft deleting object with ID [{obj_id}]")
             obj = self.get_by_id(obj_id)
             if not obj:
-                self.logger.warning(f"Object with ID [{obj_id}] not found for soft delete.")
+                self.logger.warning(f"[{self.__class__.__name__}] Object with ID [{obj_id}] not found for soft delete.")
                 return False
 
             obj.date_deleted = datetime.now()
@@ -136,7 +136,7 @@ class GenericRepository(Generic[T]):
             self.db_session.flush()
             return True
         except Exception as e:
-            self.logger.error(f"Error soft deleting object with ID [{obj_id}]: {e}")
+            self.logger.error(f"[{self.__class__.__name__}] Error soft deleting object with ID [{obj_id}]: {e}")
             raise
 
     def query(self, **filters) -> List[T]:
@@ -153,5 +153,5 @@ class GenericRepository(Generic[T]):
                 query = query.filter(getattr(self.model, attr) == value)
             return query.all()
         except Exception as e:
-            self.logger.error(f"Error querying objects: {e}")
+            self.logger.error(f"[{self.__class__.__name__}] Error querying objects: {e}")
             raise
