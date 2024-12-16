@@ -116,7 +116,10 @@
                     {
                         "task_executor": "step_function_executor",
                         "alias": "op_enriquecido_step_function_executor",
-                        "params": "{\"table_id\":\"{{ table.id }}\"}",
+                        "params": {
+                            "table_name": "{{table.name}}",
+                            "table_description": "{{table.description}}"
+                        },
                         "debounce_seconds": 30
                     }
                 ]

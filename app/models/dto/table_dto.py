@@ -17,7 +17,7 @@ class TaskDTO(BaseModel):
     task_executor_id: Optional[int] = None
     task_executor: Optional[str] = None
     alias: str
-    params: Optional[str] = None
+    params: Optional[dict] = None
     debounce_seconds: Optional[int] = None
 
 class TableDTO(BaseModel):

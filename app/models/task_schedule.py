@@ -16,6 +16,7 @@ class TaskSchedule(AbstractBase):
     table_execution_id = Column(Integer, ForeignKey('table_execution.id'), nullable=False)
     unique_alias = Column(String(350), nullable=False)
     schedule_alias = Column(String(64), nullable=True)
+    execution_arn = Column(String(350), nullable=True)
     
     task_table = relationship("TaskTable", back_populates="schedules", foreign_keys=[task_id])
     table_execution = relationship("TableExecution", back_populates="schedules", foreign_keys=[table_execution_id])

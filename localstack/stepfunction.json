@@ -1,5 +1,5 @@
 {
-  "name": "lambda-controle-step-function",
-  "roleArn": "arn:aws:iam::000000000000:role/DummyRole",
-  "definition": ""
+  "name": "exampleStateMachine",
+  "definition": "{\"Comment\": \"A simple AWS Step Functions example\", \"StartAt\": \"HelloWorld\", \"States\": {\"HelloWorld\": {\"Type\": \"Pass\", \"Result\": \"Hello, World!\", \"End\": true}}}",
+  "roleArn": "arn:aws:iam::000000000000:role/DummyRole"
 }

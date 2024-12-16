@@ -157,14 +157,27 @@ def register_execution(
 @transactional
 def trigger_event(task_service: TaskService, logger: Logger, session_provider: SessionProvider):
     payload = app.current_event.json_body
+    
+    if not payload:
+        raise ValueError("Payload is required")
+    
+    if not payload.get("task_table"):
+        raise ValueError("Task table is required in payload")
+    
+    if not payload.get("execution"):
+        raise ValueError("Execution is required in payload")
+    
+    if not payload.get("task_schedule"):
+        raise ValueError("Task schedule is required in payload")
 
-    table_id = payload["task_table"]["id"]
-    partitions = payload.get("partitions", {})
+    task_table_id = payload["task_table"]["id"]
     dependency_execution_id = payload["execution"]["id"]
+    task_schedule_id = payload["task_schedule"]["id"]
 
-    logger.info(f"Processing trigger for table ID: {table_id} with partitions: {partitions}")
+    logger.debug(f"Received trigger request for task table ID: {payload}")
+    logger.info(f"Processing trigger for task table ID: {task_table_id}")
 
-    task_service.trigger_tables(table_id=table_id, dependency_execution_id=dependency_execution_id, current_partitions=partitions)
+    task_service.trigger_tables(task_schedule_id=task_schedule_id, task_table_id=task_table_id, dependency_execution_id=dependency_execution_id)
 
-    logger.info(f"Trigger processed successfully for table ID: {table_id}")
+    logger.info(f"Trigger processed successfully for task table ID: {task_table_id}")
     return {"message": "Trigger processed successfully."}

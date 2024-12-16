@@ -1,1 +1,2 @@
 STATIC_SCHEDULE_PENDENT = 'pending'
+STATIC_SCHEDULE_IN_PROGRESS = 'in_progress'

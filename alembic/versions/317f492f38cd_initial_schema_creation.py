@@ -109,8 +109,8 @@ def upgrade() -> None:
             'step_function_executor', 
             'Chama uma stepfunction', 
             'stepfunction_process', 
-            'arn:aws:lambda:us-east-1:000000000000:function:my-test-lambda', 
-            'arn:aws:iam::000000000000:role/service-role/test-role'
+            'arn:aws:states:us-east-1:000000000000:stateMachine:exampleStateMachine', 
+            'arn:aws:iam::000000000000:role/DummyRole'
         )
         """
     )
@@ -160,6 +160,7 @@ def upgrade() -> None:
         sa.Column('table_execution_id', mysql.INTEGER(), nullable=False),
         sa.Column('unique_alias', mysql.VARCHAR(collation='utf8mb4_general_ci', length=350), nullable=False),
         sa.Column('schedule_alias', mysql.VARCHAR(collation='utf8mb4_general_ci', length=64), nullable=True),
+        sa.Column('execution_arn', mysql.VARCHAR(collation='utf8mb4_general_ci', length=350), nullable=True),
         sa.Column('date_deleted', mysql.DATETIME(), nullable=True),
         sa.Column('deleted_by', mysql.VARCHAR(collation='utf8mb4_general_ci', length=255), nullable=True),
         sa.Column('debounce_seconds', mysql.INTEGER(), nullable=False, server_default='10'),  

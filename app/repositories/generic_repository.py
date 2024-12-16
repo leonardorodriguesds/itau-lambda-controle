@@ -139,7 +139,7 @@ class GenericRepository(Generic[T]):
             self.logger.error(f"[{self.__class__.__name__}] Error soft deleting object with ID [{obj_id}]: {e}")
             raise
 
-    def query(self, **filters) -> List[T]:
+    def query(self, **filters) -> List[T]: 
         """
         Consulta objetos no banco de dados com base em filtros dinâmicos.
 
@@ -155,3 +155,5 @@ class GenericRepository(Generic[T]):
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Error querying objects: {e}")
             raise
+
+

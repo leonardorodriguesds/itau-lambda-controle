@@ -16,7 +16,7 @@ class TaskTableService:
         self.repository = repository
         self.task_executor_service = task_executor_service
         
-    def find(self, task_id: int):
+    def find(self, task_id: int) -> TaskTable:
         self.logger.debug(f"[{self.__class__.__name__}] Finding task table: [{task_id}]")
         return self.repository.get_by_id(task_id)
     
@@ -39,7 +39,7 @@ class TaskTableService:
             
         task_table.debounce_seconds = dto.debounce_seconds
         task_table.table_id = table_id
-        task_table.params = json.dumps(dto.params) if dto.params else None
+        task_table.params = dto.params
 
         
         return self.repository.save(task_table)

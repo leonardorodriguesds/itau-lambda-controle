@@ -1,176 +1,200 @@
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from threading import get_native_id
 from injector import inject
 from jinja2 import Template
+from config.constants import STATIC_SCHEDULE_IN_PROGRESS, STATIC_SCHEDULE_PENDENT
+from models.task_schedule import TaskSchedule
+from service.task_schedule_service import TaskScheduleService
+from service.boto_service import BotoService
+from models.table_execution import TableExecution
 from service.task_table_service import TaskTableService
 from service.cloud_watch_service import CloudWatchService
 from service.table_service import TableService
-from models.dependencies import Dependencies
 from service.table_execution_service import TableExecutionService
 from service.table_partition_exec_service import TablePartitionExecService
 from models.tables import Tables
-from models.dto.table_exec_dto import TableExecDTO, transform_to_table_exec_dto
+from models.dto.table_exec_dto import transform_to_table_exec_dto
 from models.task_executor import TaskExecutor
 from models.task_table import TaskTable
-import boto3
-import json
 from logging import Logger
-from typing import Any, Dict, List, Optional
-from models.table_execution import TableExecution
+from typing import Any, Dict, Optional
+import json
 
 class TaskService:
+    """
+    Serviço responsável por gerenciar e acionar tabelas com base em suas dependências e configurações de execução.
+    """
     @inject
-    def __init__(self, logger: Logger, table_execution_service: TableExecutionService, table_service: TableService, table_partition_exec_service: TablePartitionExecService, cloudwatch_service: CloudWatchService, task_table_service: TaskTableService):
+    def __init__(
+            self, 
+            logger: Logger, 
+            table_execution_service: TableExecutionService,
+            table_service: TableService, 
+            table_partition_exec_service: TablePartitionExecService,
+            cloudwatch_service: CloudWatchService, 
+            task_table_service: TaskTableService, 
+            boto_service: BotoService,
+            task_schedule_service: TaskScheduleService
+        ):
         self.logger = logger
         self.table_execution_service = table_execution_service
         self.table_service = table_service
         self.table_partition_exec_service = table_partition_exec_service
         self.cloudwatch_service = cloudwatch_service
         self.task_table_service = task_table_service
+        self.boto_service = boto_service
+        self.task_schedule_service = task_schedule_service
 
-    def trigger_tables(self, task_table_id: int, dependency_execution_id: int, current_partitions: Dict[str, Any] = None):
+    def trigger_tables(self, task_schedule_id: int, task_table_id: int, dependency_execution_id: int):
+        """
+        Aciona a execução de tabelas com base nas dependências e nas partições fornecidas.
+
+        :param task_table_id: ID da tabela da tarefa a ser executada.
+        :param dependency_execution_id: ID da execução da dependência.
+        :param current_partitions: Dicionário contendo partições atuais (opcional).
+        """
         start_time = datetime.utcnow()
-        error_count = 0
-        self.logger.info(f"[{self.__class__.__name__}] Triggering task table [{task_table_id}] with partitions: {current_partitions}")
-        
-        task_table: TaskTable = self.task_table_service.find(task_id=task_table_id)
-        table: Tables = task_table.table
-        dependency_execution: TableExecution = self.table_execution_service.find(id=dependency_execution_id)
-        
-        def resolve_dependency(dependency: Dependencies) -> Dict[str, Any]:
-            execution: TableExecution = self.table_execution_service.get_latest_execution_with_restrictions(dependency.id, current_partitions)
-            if not execution:
-                self.logger.debug(f"[{self.__class__.__name__}][{table.name}] No execution found for dependency [{dependency.dependency_table.name}]")
-                return None
-            self.logger.debug(f"[{self.__class__.__name__}][{table.name}] Execution found for dependency [{dependency.dependency_table.name}]: [{execution.id}]")
-            return {
-                p.partition.name: p.value for p in self.table_partition_exec_service.get_by_execution(execution.id)
+        self.logger.info(f"[{self.__class__.__name__}] Trigger iniciado para task_table_id: {task_table_id}, dependency_execution_id: {dependency_execution_id}")
+        try:
+            task_schedule_list = self.task_schedule_service.query(
+                id=task_schedule_id,
+                status=STATIC_SCHEDULE_PENDENT
+            )
+            
+            task_schedule = task_schedule_list[0] if task_schedule_list else None
+            
+            if not task_schedule:
+                self.logger.warning(f"[{self.__class__.__name__}] Task Schedule não encontrado ou já processado.")
+                return
+            
+            self.logger.debug(f"[{self.__class__.__name__}] Task Schedule encontrado: {task_schedule}")
+            
+            task_table = self.task_table_service.find(task_id=task_table_id)
+            table = task_table.table
+            dependency_execution = self.table_execution_service.find(id=dependency_execution_id)
+            
+            current_partitions = {
+                p.partition.name: p.value
+                for p in self.table_partition_exec_service.get_by_execution(dependency_execution.id)
             }
+            
+            self.logger.debug(f"[{self.__class__.__name__}][{table.name}] Partições atuais: {current_partitions}")
+            dependencies_partitions = self._resolve_dependencies(table, current_partitions)
+            
+            if dependencies_partitions is None:
+                self.logger.warning(f"[{self.__class__.__name__}][{table.name}] Dependências não resolvidas. Execução cancelada.")
+                return
 
+            self.process(task_schedule, task_table, dependency_execution, dependencies_partitions)
+
+        except Exception as e:
+            self.logger.exception(f"[{self.__class__.__name__}] Erro ao acionar tabelas: {str(e)}")
+            self.cloudwatch_service.add_metric("TriggerTablesErrorCount", 1, "Count")
+
+        finally:
+            execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            self.cloudwatch_service.add_metric("TriggerTablesExecutionTime", execution_time, "Milliseconds")
+            self.logger.info(f"[{self.__class__.__name__}] Trigger concluído em {execution_time:.2f} ms")
+
+    def _resolve_dependencies(self, table: Tables, current_partitions: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Resolve as dependências da tabela fornecida.
+
+        :param table: Instância da tabela.
+        :param current_partitions: Partições atuais fornecidas.
+        :return: Dicionário com partições resolvidas ou None caso alguma dependência obrigatória falhe.
+        """
         dependencies_partitions = {}
         for dependency in table.dependencies:
-            resolved = resolve_dependency(dependency)
-            if resolved is None:
-                self.logger.debug(f"[{self.__class__.__name__}][{table.name}] Failed to resolve dependency [{dependency.dependency_table.name}]")
-                return
+            execution = self.table_execution_service.get_latest_execution_with_restrictions(dependency.id, current_partitions)
+            if not execution and dependency.is_required:
+                self.logger.warning(f"[{self.__class__.__name__}][{table.name}] Dependência obrigatória não resolvida: {dependency.dependency_table.name}")
+                return None
 
-            dependencies_partitions[dependency.dependency_table.name] = resolved
+            dependencies_partitions[dependency.dependency_table.name] = {
+                p.partition.name: p.value for p in self.table_partition_exec_service.get_by_execution(execution.id)
+            } if execution else {}
 
-        self.logger.debug(f"[{self.__class__.__name__}][{table.name}] Dependencies partitions for table [{table.name}]: {dependencies_partitions}")
+        return dependencies_partitions
 
-        for dep in table.dependencies:
-            if dep.is_required and not dependencies_partitions[dep.dependency_table.name]:
-                self.logger.debug(f"[{self.__class__.__name__}][{table.name}] No execution found for dependency [{dep}]")
-                return
-
-        self.process(task_table, dependency_execution, dependencies_partitions)
-        
-        total_execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
-        self.cloudwatch_service.add_metric(name="TriggerTablesExecutionTime", value=total_execution_time, unit="Milliseconds")
-        self.cloudwatch_service.add_metric(name="TriggerTablesErrorCount", value=error_count, unit="Count")  
-
-    def process(self, task_table: TaskTable, execution: TableExecution, dependencies_executions: Dict[str, Dict[str, Any]]):
-        self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Processing task: [{task_table.alias}] for execution: [{execution.id}]")
-        task: TaskExecutor = task_table.task_executor
-
-        table_info: TableExecDTO = transform_to_table_exec_dto(execution, dependencies_executions)
-
-        payload = self.interpolate_payload(
-            task_table.params,
-            table_info, 
-            execution, 
-            task, 
-            task_table, 
-            task_table.table,
-            dependencies_executions
-        )
-
-        try:
-            if task.method == "stepfunction_process":
-                self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Processing stepfunction: [{task_table.alias}]")
-                self.stepfunction_process(execution, payload, task)
-                self.cloudwatch_service.add_metric(name="StepFunctionProcesses", value=1, unit="Count")
-            elif task.method == "sqs_process":
-                self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Processing SQS: [{task_table.alias}]")
-                self.sqs_process(payload, task)
-                self.cloudwatch_service.add_metric(name="SQSProcesses", value=1, unit="Count")
-            elif task.method == "glue_process":
-                self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Processing Glue Job: [{task_table.alias}]")
-                self.glue_process(payload, task)
-                self.cloudwatch_service.add_metric(name="GlueProcesses", value=1, unit="Count")
-            elif task.method == "lambda_process":
-                self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Invoking Lambda: [{task_table.alias}]")
-                self.lambda_process(payload, task)
-                self.cloudwatch_service.add_metric(name="LambdaProcesses", value=1, unit="Count")
-            elif task.method == "eventbridge_process":
-                self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Creating EventBridge Rule: [{task_table.alias}]")
-                self.eventbridge_process(payload, task)
-                self.cloudwatch_service.add_metric(name="EventBridgeProcesses", value=1, unit="Count")
-            elif task.method == "api_process":
-                self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Calling API: [{task_table.alias}]")
-                self.api_process(payload, task)
-                self.cloudwatch_service.add_metric(name="APIProcesses", value=1, unit="Count")
-            else:
-                self.logger.error(f"[{self.__class__.__name__}][{task_table.table.name}] Unknown processing method: [{task.method}]")
-                raise ValueError(f"Unsupported task method: {task.method}")
-        except Exception as e:
-            self.logger.error(f"[{self.__class__.__name__}][{task_table.table.name}] Error in process method: {e}")
-            raise
-
-            
-    def interpolate_payload(
-        self,
-        payload: Optional[dict],
-        table_exec: TableExecDTO,
-        table_execution: TableExecution,
-        task_executor: TaskExecutor,
-        task_table: TaskTable,
-        table: Tables,
-        dependencies_executions: Dict[str, Dict[str, Any]]
-    ) -> dict:
+    def process(self, task_schedule: TaskSchedule, task_table: TaskTable, execution: TableExecution, dependencies_partitions: Dict[str, Any]):
         """
-        Interpola variáveis em um payload JSON usando informações de TableExecDTO, TableExecution, TaskExecutor, TaskTable e Table.
+        Processa a execução da tarefa da tabela.
 
-        :param payload: O payload JSON a ser interpolado.
-        :param table_exec: Instância de TableExecDTO contendo informações da execução da tabela.
-        :param table_execution: Instância de TableExecution.
-        :param task_executor: Instância de TaskExecutor.
+        :param task_schedule: Instância de TaskSchedule.
         :param task_table: Instância de TaskTable.
-        :param table: Instância de Table.
-        :return: Payload interpolado com valores das variáveis, ou TableExecDTO se o payload for vazio.
+        :param execution: Instância de TableExecution associada.
+        :param dependencies_partitions: Dicionário com as partições resolvidas das dependências.
         """
-        if not payload:
-            self.logger.debug(f"[{self.__class__.__name__}] Payload vazio. Retornando TableExecDTO como resposta.")
-            return table_exec.dict()
-
-        self.logger.debug(f"[{self.__class__.__name__}] Interpolando payload com Jinja: {payload}")
-
+        self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Iniciando processamento.")
         try:
-            payload_str = json.dumps(payload)
-            self.logger.debug(f"[{self.__class__.__name__}] Payload JSON: {payload_str}")
-            template = Template(payload_str)
+            task: TaskExecutor = task_table.task_executor
+            table_info = transform_to_table_exec_dto(execution, dependencies_partitions)
+                
+            self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Parâmetros da tarefa: {task_table.params}({type (task_table.params)})")
 
-            context = {
-                "table_exec": table_exec.dict(),
-                "table_execution": table_execution.dict(),
-                "task_executor": task_executor.dict(),
-                "task_table": task_table.dict(),
-                "table": table.dict(),
-                "dependencies": dependencies_executions
+            payload = self._interpolate_payload(
+                task_table.params,
+                table=task_table.table,
+                partitions=dependencies_partitions,
+                execution=execution,
+                task=task,
+                task_table=task_table,
+                table_info=table_info,
+            )
+
+            payload["unique_alias"] = task_schedule.unique_alias
+
+            method_map = {
+                "stepfunction_process": self.stepfunction_process,
+                "sqs_process": self.sqs_process,
+                "glue_process": self.glue_process,
+                "lambda_process": self.lambda_process,
+                "eventbridge_process": self.eventbridge_process,
+                "api_process": self.api_process
             }
-            
-            self.logger.debug(f"[{self.__class__.__name__}] Contexto de interpolação: [{context}]")
 
-            interpolated_payload = template.render(**context)
-            
-            self.logger.debug(f"[{self.__class__.__name__}] Payload: [{interpolated_payload}]")
+            if task.method in method_map:
+                response = method_map[task.method](execution, payload, task)
+                self.cloudwatch_service.add_metric(f"{task.method.capitalize()}Count", 1, "Count")
 
-            return json.loads(interpolated_payload)
+                if response.get("ExecutionArn"):
+                    self.logger.info(f"[{self.__class__.__name__}][{task_table.table.name}] Processamento iniciado: {response['ExecutionArn']}")
+
+                    self.task_schedule_service.save({
+                        "id": task_schedule.id,
+                        "unique_alias": task_schedule.unique_alias,
+                        "status": STATIC_SCHEDULE_IN_PROGRESS,
+                        "execution_arn": response["ExecutionArn"]
+                    })
+            else:
+                self.logger.error(f"[{self.__class__.__name__}][{task_table.table.name}] Método de processamento desconhecido: {task.method}")
+                raise ValueError(f"Método de processamento não suportado: {task.method}")
 
         except Exception as e:
-            self.logger.error(f"[{self.__class__.__name__}] Erro ao interpolar payload: {e}")
+            self.logger.exception(f"[{self.__class__.__name__}][{task_table.table.name}] Erro no processamento: {str(e)}")
+            self.cloudwatch_service.add_metric("ProcessingErrors", 1, "Count")
+
+
+    def _interpolate_payload(self, payload: Optional[dict], **kwargs) -> dict:
+        """
+        Interpola o payload JSON fornecido usando o Jinja2.
+
+        :param payload: Payload JSON base.
+        :param kwargs: Contexto adicional para interpolação, com aliases explícitos.
+        :return: Payload interpolado como um dicionário.
+        """
+        try:
+            template = Template(json.dumps(payload))
+            context = {
+                alias: obj.dict() if hasattr(obj, 'dict') else obj
+                for alias, obj in kwargs.items()
+            }
+            interpolated = template.render(**context)            
+            return json.loads(interpolated)
+        except Exception as e:
+            self.logger.exception(f"[{self.__class__.__name__}] Erro ao interpolar payload: {e}")
             raise
+
 
     def stepfunction_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         """
@@ -183,7 +207,7 @@ class TaskService:
         try:
             self.logger.debug(f"[{self.__class__.__name__}] Invoking Step Function [{task_executor.identification}] for execution: [{execution.id}]")
             
-            client = boto3.client('stepfunctions')
+            client = self.boto_service.get_client('stepfunctions')
 
             payload_with_metadata = {
                 "execution_id": execution.id,
@@ -212,7 +236,7 @@ class TaskService:
         
     def sqs_process(self, payload: dict, task_executor: TaskExecutor):
         try:
-            sqs_client = boto3.client('sqs')
+            sqs_client = self.boto_service.get_client('sqs')
             response = sqs_client.send_message(
                 QueueUrl=task_executor.identification,
                 MessageBody=json.dumps(payload)
@@ -224,7 +248,7 @@ class TaskService:
         
     def glue_process(self, payload: dict, task_executor: TaskExecutor):
         try:
-            glue_client = boto3.client('glue')
+            glue_client = self.boto_service.get_client('glue')
             response = glue_client.start_job_run(
                 JobName=task_executor.identification,
                 Arguments=payload
@@ -236,7 +260,7 @@ class TaskService:
         
     def lambda_process(self, payload: dict, task_executor: TaskExecutor):
         try:
-            lambda_client = boto3.client('lambda')
+            lambda_client = self.boto_service.get_client('lambda')
             response = lambda_client.invoke(
                 FunctionName=task_executor.identification,
                 InvocationType='Event',
@@ -249,7 +273,7 @@ class TaskService:
 
     def eventbridge_process(self, payload: dict, task_executor: TaskExecutor):
         try:
-            eventbridge_client = boto3.client('events')
+            eventbridge_client = self.boto_service.get_client('events')
             response = eventbridge_client.put_events(
                 Entries=[
                     {
@@ -273,4 +297,3 @@ class TaskService:
         except Exception as e:
             self.logger.error(f"Error calling API: {e}")
             raise
-

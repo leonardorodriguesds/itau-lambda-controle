@@ -38,7 +38,7 @@ class EventBridgeSchedulerService:
         partitions_string = self.dict_to_clean_string(partitions) if partitions else "NoPartitions"
         return f"{task_table.table.name}-{task_table.alias}-{last_execution_id}-{partitions_string}"
 
-    def build_event_payload(self, task_table: TaskTable, trigger_execution: TableExecution, partitions: Dict[str, Any], unique_alias: str) -> Dict[str, Any]:
+    def build_event_payload(self, task_table: TaskTable, trigger_execution: TableExecution, task_schedule: TaskSchedule, partitions: Dict[str, Any]) -> Dict[str, Any]:
         """
         Constrói o payload detalhado para o evento do scheduler.
         """
@@ -55,10 +55,15 @@ class EventBridgeSchedulerService:
                     "id": task_table.id,
                     "alias": task_table.alias,
                 },
+                "task_schedule": {
+                    "id": task_schedule.id,
+                    "schedule_alias": task_schedule.schedule_alias,
+                    "unique_alias": task_schedule.unique_alias,
+                },
                 "partitions": partitions,
             },
             "metadata": {
-                "unique_alias": unique_alias,
+                "unique_alias": task_schedule.unique_alias,
                 "debounce_seconds": task_table.debounce_seconds,
             }
         }
@@ -112,9 +117,18 @@ class EventBridgeSchedulerService:
             self.logger.info(f"[{self.__class__.__name__}] Registering new event for task_table ID: {task_table.id}")
             schedule_execution_time = datetime.now() + timedelta(seconds=task_table.debounce_seconds)
             schedule_expression = schedule_execution_time.strftime("cron(%M %H %d %m ? *)")
-
-            payload = self.build_event_payload(task_table, trigger_execution, partitions, unique_alias)
+            
             schedule_alias = f"{schedule_execution_time.strftime('%Y%m%d%H%M%S')}-{task_table.id}"[:64]
+            
+            task_schedule = self.task_schedule_service.save({
+                "task_id": task_table.id,
+                "unique_alias": unique_alias,
+                "schedule_alias": schedule_alias,
+                "table_execution_id": trigger_execution.id,
+                "scheduled_execution_time": schedule_execution_time
+            })
+
+            payload = self.build_event_payload(task_table, trigger_execution, task_schedule, partitions)
 
             response = self.scheduler_client.create_schedule(
                 Name=schedule_alias,
@@ -128,14 +142,6 @@ class EventBridgeSchedulerService:
             )
 
             self.logger.info(f"[{self.__class__.__name__}] Event registered successfully: {response.get('ScheduleArn', 'unknown')}")
-
-            self.task_schedule_service.save({
-                "task_id": task_table.id,
-                "unique_alias": unique_alias,
-                "schedule_alias": schedule_alias,
-                "table_execution_id": trigger_execution.id,
-                "scheduled_execution_time": schedule_execution_time
-            })
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Failed to register event: {e}")
             raise
@@ -149,7 +155,16 @@ class EventBridgeSchedulerService:
             schedule_execution_time = datetime.now() + timedelta(seconds=task_schedule.task_table.debounce_seconds)
             schedule_expression = schedule_execution_time.strftime("cron(%M %H %d %m ? *)")
 
-            payload = self.build_event_payload(task_schedule.task_table, trigger_execution, partitions, task_schedule.unique_alias)
+            task_schedule = self.task_schedule_service.save({
+                "id": task_schedule.id,
+                "task_id": task_schedule.task_table.id,
+                "unique_alias": task_schedule.unique_alias,
+                "schedule_alias": schedule_alias,
+                "table_execution_id": trigger_execution.id,
+                "scheduled_execution_time": schedule_execution_time
+            })
+            
+            payload = self.build_event_payload(task_schedule.task_table, trigger_execution, task_schedule, partitions)
 
             response = self.scheduler_client.update_schedule(
                 Name=schedule_alias,
@@ -163,15 +178,6 @@ class EventBridgeSchedulerService:
             )
 
             self.logger.info(f"[{self.__class__.__name__}] Event updated successfully: {response}")
-
-            self.task_schedule_service.save({
-                "id": task_schedule.id,
-                "task_id": task_schedule.task_table.id,
-                "unique_alias": task_schedule.unique_alias,
-                "schedule_alias": schedule_alias,
-                "table_execution_id": trigger_execution.id,
-                "scheduled_execution_time": schedule_execution_time
-            })
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Failed to update event: {e}")
             raise
