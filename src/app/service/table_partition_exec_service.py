@@ -41,7 +41,7 @@ class TablePartitionExecService:
             self.logger.debug(f"[{self.__class__.__name__}] Last execution ID for table [{table.name}]: [{last_execution.id}]")
             current_partitions = {
                 p.partition.name: p.value
-                for p in self.repository.get_by_execution(last_execution.id)
+                for p in self.get_by_execution(last_execution.id)
             }
 
             for table in tables:
