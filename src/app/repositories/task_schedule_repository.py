@@ -18,4 +18,8 @@ class TaskScheduleRepository(GenericRepository[TaskSchedule]):
         return self.session.query(TaskSchedule).filter(TaskSchedule.status == STATIC_SCHEDULE_PENDENT).all()
     
     def get_by_unique_alias_and_pendent(self, unique_alias):
-        return self.session.query(TaskSchedule).filter(TaskSchedule.unique_alias == unique_alias, TaskSchedule.status == STATIC_SCHEDULE_PENDENT).first()
+        self.logger.debug(f"[{self.__class__.__name__}] Getting task schedule by unique alias: {unique_alias}")
+        return self.session.query(TaskSchedule).filter(
+            TaskSchedule.unique_alias == unique_alias, 
+            TaskSchedule.status == STATIC_SCHEDULE_PENDENT
+        ).first()

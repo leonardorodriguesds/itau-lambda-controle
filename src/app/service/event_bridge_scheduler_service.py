@@ -79,7 +79,8 @@ class EventBridgeSchedulerService:
             response = self.scheduler_client.list_schedules(NamePrefix=schedule_alias)
             schedules = response.get("Schedules", [])
             for schedule in schedules:
-                if schedule.get("Name") == schedule_alias:
+                self.logger.info(f"[{self.__class__.__name__}] Checking event existence: {schedule.get('Name')}={schedule_alias}")
+                if schedule.get("Name").lower() == schedule_alias.lower():
                     self.logger.info(f"[{self.__class__.__name__}] Event with alias '{schedule_alias}' exists.")
                     return True
         except self.scheduler_client.exceptions.ResourceNotFoundException:
@@ -100,16 +101,16 @@ class EventBridgeSchedulerService:
 
             if possible_schedule and self.check_event_exists(possible_schedule.schedule_alias):
                 self.logger.info(f"[{self.__class__.__name__}] Found existing schedule for alias: {unique_alias}. Updating event.")
-                self.postergate_event(possible_schedule.schedule_alias, possible_schedule, trigger_execution, table_last_execution)
+                self.postergate_event(possible_schedule, possible_schedule.schedule_alias, possible_schedule, trigger_execution, table_last_execution)
             else:
                 self.logger.info(f"[{self.__class__.__name__}] No schedule found for alias: {unique_alias}. Registering new event.")
-                self.register_event(unique_alias, task_table, trigger_execution, table_last_execution)
+                self.register_event(possible_schedule, unique_alias, task_table, trigger_execution, table_last_execution)
 
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Error during register_or_postergate_event: {e}")
             raise
 
-    def register_event(self, unique_alias: str, task_table: TaskTable, trigger_execution: TableExecution, partitions: Dict[str, Any]):
+    def register_event(self, possible_schedule: TaskSchedule, unique_alias: str, task_table: TaskTable, trigger_execution: TableExecution, partitions: Dict[str, Any]):
         """
         Registra um novo evento no EventBridge.
         """
@@ -121,6 +122,7 @@ class EventBridgeSchedulerService:
             schedule_alias = f"{schedule_execution_time.strftime('%Y%m%d%H%M%S')}-{task_table.id}"[:64]
             
             task_schedule = self.task_schedule_service.save({
+                "id": possible_schedule.id if possible_schedule else None,
                 "task_id": task_table.id,
                 "unique_alias": unique_alias,
                 "schedule_alias": schedule_alias,

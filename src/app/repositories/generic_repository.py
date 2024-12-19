@@ -157,3 +157,13 @@ class GenericRepository(Generic[T]):
             raise
 
 
+    def flush(self):
+        """
+        Executa um flush na sessão do banco de dados.
+        """
+        try:
+            self.logger.debug(f"[{self.__class__.__name__}] Flushing database session")
+            self.db_session.flush()
+        except Exception as e:
+            self.logger.error(f"[{self.__class__.__name__}] Error flushing database session: {e}")
+            raise

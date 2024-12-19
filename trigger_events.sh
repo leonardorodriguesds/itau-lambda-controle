@@ -1,5 +1,6 @@
 #!/bin/bash
 
+awslocal configure set region us-east-1
 # Verifica se o nome do scheduler foi fornecido
 if [ -z "$1" ]; then
   echo "Usage: $0 <scheduler_name>"
@@ -31,7 +32,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Executa o programa Python com o arquivo JSON
-python3 app/lambda_function.py -f $JSON_FILE -v
+python3 lambda_function.py -f $JSON_FILE -v
 PYTHON_EXIT_CODE=$?
 
 # Remove o arquivo JSON temporário após a execução

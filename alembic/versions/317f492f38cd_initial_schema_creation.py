@@ -168,7 +168,6 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(['task_id'], ['task_table.id'], name='task_schedule_ibfk_1'),
         sa.ForeignKeyConstraint(['table_execution_id'], ['table_execution.id'], name='task_schedule_ibfk_2'),
         sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('task_id', 'scheduled_execution_time'),
         mysql_collate='utf8mb4_general_ci',
         mysql_default_charset='utf8mb4',
         mysql_engine='InnoDB'
