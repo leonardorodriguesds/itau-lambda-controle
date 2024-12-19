@@ -23,7 +23,6 @@ def transform_to_table_exec_dto(execution: TableExecution, dependencies_executio
     :return: TableExecDTO.
     """
 
-    # Construir o DTO
     dto = TableExecDTO(
         id=execution.id,
         name=execution.table.name,  

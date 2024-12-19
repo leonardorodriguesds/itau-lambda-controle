@@ -234,7 +234,7 @@ class TaskService:
             self.logger.error(f"Error invoking Step Function: {e}")
             raise
         
-    def sqs_process(self, payload: dict, task_executor: TaskExecutor):
+    def sqs_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             sqs_client = self.boto_service.get_client('sqs')
             response = sqs_client.send_message(
@@ -246,7 +246,7 @@ class TaskService:
             self.logger.error(f"Error sending SQS message: {e}")
             raise
         
-    def glue_process(self, payload: dict, task_executor: TaskExecutor):
+    def glue_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             glue_client = self.boto_service.get_client('glue')
             response = glue_client.start_job_run(
@@ -258,7 +258,7 @@ class TaskService:
             self.logger.error(f"Error starting Glue job: {e}")
             raise
         
-    def lambda_process(self, payload: dict, task_executor: TaskExecutor):
+    def lambda_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             lambda_client = self.boto_service.get_client('lambda')
             response = lambda_client.invoke(
@@ -271,7 +271,7 @@ class TaskService:
             self.logger.error(f"Error invoking Lambda function: {e}")
             raise
 
-    def eventbridge_process(self, payload: dict, task_executor: TaskExecutor):
+    def eventbridge_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             eventbridge_client = self.boto_service.get_client('events')
             response = eventbridge_client.put_events(
@@ -288,7 +288,7 @@ class TaskService:
             self.logger.error(f"Error sending EventBridge event: {e}")
             raise
 
-    def api_process(self, payload: dict, task_executor: TaskExecutor):
+    def api_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             import requests
             response = requests.post(task_executor.identification, json=payload)
