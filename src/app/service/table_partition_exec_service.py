@@ -149,12 +149,15 @@ class TablePartitionExecService:
             self.logger.debug(f"[{self.__class__.__name__}] Triggering dependent tables for execution ID: {new_execution.id}")
             self.trigger_tables(new_execution.table_id)
             return {"message": "Table partition execution entries registered successfully."}
-
+        
+        except TableInsertError as e:
+            self.logger.error(f"[{self.__class__.__name__}] Table insertion error: {str(e)}")
+            error_count += 1
+            raise e
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Error registering partition executions: {str(e)}")
             error_count += 1
             raise TableInsertError(f"Erro ao registrar execuções de partições: {str(e)}")
-
         finally:
             total_execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
             self.cloudwatch_service.add_metric(name="RegisterPartitionsExecTime", value=total_execution_time, unit="Milliseconds")

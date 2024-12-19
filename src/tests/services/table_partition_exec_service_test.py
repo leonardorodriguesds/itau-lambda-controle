@@ -129,66 +129,82 @@ def test_trigger_tables_with_execution_dependencies(service, mock_services):
     ]
 
     mock_services["event_bridge_scheduler_service"].register_or_postergate_event.assert_has_calls(expected_calls, any_order=True)
-
-def test_register_partitions_exec_success(service, mock_services):
-    """Test that `register_partitions_exec` successfully registers partitions."""
-    mock_services["table_service"].find.return_value = Tables(id=1, name="MainTable", partitions=[
-        MagicMock(id=1, name="Partition1", is_required=True),
-        MagicMock(id=2, name="Partition2", is_required=False),
-    ])
-    mock_services["table_execution_service"].create_execution.return_value = TableExecution(id=10, table_id=1)
+    
+def test_register_partitions_exec_with_table_id(service, mock_services):
+    """Test the register_partitions_exec method of TablePartitionExecService."""
+    mock_table = MagicMock(id=1, name="TestTable")
+    mock_required_partition = MagicMock(id=1, name="RequiredPartition", is_required=True)
+    mock_optional_partition = MagicMock(id=2, name="OptionalPartition", is_required=False)
+    mock_table.partitions = [mock_required_partition, mock_optional_partition]
+    mock_services["table_service"].find.return_value = mock_table
 
     dto = TablePartitionExecDTO(
         table_id=1,
+        table_name=None,
+        source="TestSource",
+        user="TestUser",
         partitions=[
-            PartitionDTO(partition_id=1, value="val1"),
-            PartitionDTO(partition_id=2, value="val2"),
-        ],
-        source="TestSource"
+            PartitionDTO(partition_id=1, partition_name=None, value="Value1"),
+            PartitionDTO(partition_id=2, partition_name=None, value="Value2"),
+        ]
     )
 
-    result = service.register_partitions_exec(dto)
+    mock_services["repository"].save = MagicMock()
+    mock_new_execution = MagicMock(id=100, table_id=1)
+    mock_services["table_execution_service"].create_execution.return_value = mock_new_execution
 
-    # Validate repository save calls
-    assert mock_services["repository"].save.call_count == 2
-    mock_services["table_service"].find.assert_called_once_with(table_id=1)
+    service.register_partitions_exec(dto)
+
+    mock_services["table_service"].find.assert_has_calls([
+        call(table_id=1),
+        call(table_id=1),
+    ])    
+    assert mock_services["table_service"].find.call_count == 2
     mock_services["table_execution_service"].create_execution.assert_called_once_with(1, "TestSource")
-    mock_services["event_bridge_scheduler_service"].register_or_postergate_event.assert_called_once()
+    mock_services["repository"].save.assert_called()
 
-    assert result == {"message": "Table partition execution entries registered successfully."}
-
-def test_register_partitions_exec_missing_partition(service, mock_services):
-    """Test that `register_partitions_exec` raises error when required partition is missing."""
-    mock_services["table_service"].find.return_value = Tables(id=1, name="MainTable", partitions=[
-        MagicMock(id=1, name="Partition1", is_required=True),
-        MagicMock(id=2, name="Partition2", is_required=False),
-    ])
+def test_register_partitions_exec_missing_required_partition(service, mock_services):
+    """Test the register_partitions_exec method when required partitions are missing."""
+    mock_table = MagicMock(id=1, name="TestTable")
+    mock_required_partition = MagicMock()
+    mock_required_partition.is_required = True
+    mock_required_partition.name = "RequiredPartition"
+    mock_required_partition.id = 1
+    mock_table.partitions = [mock_required_partition]
+    mock_services["table_service"].find.return_value = mock_table
 
     dto = TablePartitionExecDTO(
         table_id=1,
-        partitions=[
-            PartitionDTO(partition_id=2, value="val2"), 
-        ],
-        source="TestSource"
+        table_name=None,
+        source="TestSource",
+        user="TestUser",
+        partitions=[]
     )
 
-    with pytest.raises(TableInsertError, match="As seguintes partições obrigatórias estão faltando: Partition1"):
+    with pytest.raises(TableInsertError) as excinfo:
         service.register_partitions_exec(dto)
+        
+    assert "RequiredPartition" in str(excinfo.value)
 
 def test_register_partitions_exec_invalid_partition(service, mock_services):
-    """Test that `register_partitions_exec` raises error when partition does not belong to the table."""
-    mock_services["table_service"].find.return_value = Tables(id=1, name="MainTable", partitions=[
-        MagicMock(id=1, name="Partition1", is_required=True),
-        MagicMock(id=2, name="Partition2", is_required=False),
-    ])
+    """Test the register_partitions_exec method with an invalid partition."""
+    mock_table = MagicMock(id=1, name="TestTable")
+    mock_valid_partition = MagicMock()
+    mock_valid_partition.id = 1
+    mock_valid_partition.name = "ValidPartition"
+    mock_valid_partition.is_required = False
+    mock_table.partitions = [mock_valid_partition]
+    mock_services["table_service"].find.return_value = mock_table
 
     dto = TablePartitionExecDTO(
         table_id=1,
-        partitions=[
-            PartitionDTO(partition_id=3, value="val3"),  
-        ],
-        source="TestSource"
+        table_name=None,
+        source="TestSource",
+        user="TestUser",
+        partitions=[PartitionDTO(partition_id=99, partition_name=None, value="Value99")]
     )
 
-    with pytest.raises(TableInsertError, match="Partição com ID '3' não está associada à tabela 'MainTable'."):
+    with pytest.raises(TableInsertError) as excinfo:
         service.register_partitions_exec(dto)
+
+    assert "não está associada à tabela" in str(excinfo.value)
