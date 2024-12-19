@@ -16,7 +16,8 @@ class AppModule(Module):
         binder.bind(TablePartitionExecService, to=TablePartitionExecService, scope=singleton)
         binder.bind(EventBridgeSchedulerService, to=EventBridgeSchedulerService, scope=singleton)
         binder.bind(logging.Logger, to=logger),
-        binder.bind(boto3.Session, to=Boto3SessionProvider().provide_session, scope=singleton)
+        binder.bind(boto3.Session, to=Boto3SessionProvider().provide_session(), scope=singleton)
+
 
 
 injector = Injector([AppModule()])
