@@ -101,7 +101,7 @@ class EventBridgeSchedulerService:
 
             if possible_schedule and self.check_event_exists(possible_schedule.schedule_alias):
                 self.logger.info(f"[{self.__class__.__name__}] Found existing schedule for alias: {unique_alias}. Updating event.")
-                self.postergate_event(possible_schedule, possible_schedule.schedule_alias, possible_schedule, trigger_execution, table_last_execution)
+                self.postergate_event(possible_schedule.schedule_alias, possible_schedule, trigger_execution, table_last_execution)
             else:
                 self.logger.info(f"[{self.__class__.__name__}] No schedule found for alias: {unique_alias}. Registering new event.")
                 self.register_event(possible_schedule, unique_alias, task_table, trigger_execution, table_last_execution)

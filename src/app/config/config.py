@@ -1,6 +1,6 @@
 import logging
 import boto3
-from injector import Binder, Injector, Module, singleton
+from injector import Binder, Module, singleton
 from src.app.provider.boto3_session_provider import Boto3SessionProvider
 from src.app.config.logger import logger
 from src.app.provider.session_provider import SessionProvider
@@ -17,7 +17,3 @@ class AppModule(Module):
         binder.bind(EventBridgeSchedulerService, to=EventBridgeSchedulerService, scope=singleton)
         binder.bind(logging.Logger, to=logger),
         binder.bind(boto3.Session, to=Boto3SessionProvider().provide_session(), scope=singleton)
-
-
-
-injector = Injector([AppModule()])

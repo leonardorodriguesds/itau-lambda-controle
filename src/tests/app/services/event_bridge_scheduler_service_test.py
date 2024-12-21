@@ -3,6 +3,7 @@ import pytest
 from botocore.exceptions import ClientError
 from unittest.mock import MagicMock, PropertyMock
 from src.app.models.table_execution import TableExecution
+from src.app.models.task_executor import TaskExecutor
 from src.app.models.task_schedule import TaskSchedule
 from src.app.models.task_table import TaskTable
 from src.app.service.event_bridge_scheduler_service import EventBridgeSchedulerService
@@ -131,3 +132,71 @@ def test_check_event_exists_resource_not_found_exception(service):
     result = service.check_event_exists(schedule_alias)
     assert result is False
     service.scheduler_client.list_schedules.assert_called_once_with(NamePrefix=schedule_alias)
+    
+def test_register_or_postergate_event(service):
+    task_table = MagicMock(spec=TaskTable)
+    task_table.id = 1
+    task_table.alias = "example_alias"
+    task_table.debounce_seconds = 60
+    task_table.task_executor = MagicMock(spec=TaskExecutor)
+
+    trigger_execution = MagicMock(spec=TableExecution)
+    trigger_execution.id = 101
+
+    last_execution = MagicMock(spec=TableExecution)
+    last_execution.id = 100
+
+    partitions = {"partition1": "value1"}
+
+    service.task_schedule_service.get_by_unique_alias_and_pendent.return_value = None
+
+    service.register_or_postergate_event(task_table, trigger_execution, last_execution, partitions)
+
+    service.task_schedule_service.get_by_unique_alias_and_pendent.assert_called_once()
+    service.scheduler_client.create_schedule.assert_called_once()
+
+def test_register_event(service):
+    task_table = MagicMock(spec=TaskTable)
+    task_table.id = 1
+    task_table.alias = "example_alias"
+    task_table.debounce_seconds = 60
+    task_table.task_executor = MagicMock(spec=TaskExecutor)
+    task_table.task_executor.identification = "arn:aws:lambda:region:account:function"
+    task_table.task_executor.target_role_arn = "arn:aws:iam::account:role/service-role"
+
+    trigger_execution = MagicMock(spec=TableExecution)
+    trigger_execution.id = 101
+
+    last_execution = MagicMock(spec=TableExecution)
+    last_execution.id = 100
+
+    partitions = {"partition1": "value1"}
+
+    service.register_event(task_table, trigger_execution, last_execution, partitions)
+
+    service.scheduler_client.create_schedule.assert_called_once()
+
+def test_postergate_event(service):
+    task_schedule = MagicMock(spec=TaskSchedule)
+    task_schedule.id = 1
+    task_schedule.unique_alias = "unique_alias"
+    task_schedule.task_table = MagicMock(spec=TaskTable)
+    task_schedule.task_table.task_executor = MagicMock(spec=TaskExecutor)
+    task_schedule.task_table.task_executor.identification = "arn:aws:lambda:region:account:function"
+    task_schedule.task_table.task_executor.target_role_arn = "arn:aws:iam::account:role/service-role"
+
+    trigger_execution = MagicMock(spec=TableExecution)
+    trigger_execution.id = 101
+
+    service.postergate_event(task_schedule, trigger_execution)
+
+    service.scheduler_client.update_schedule.assert_called_once()
+
+def test_delete_event(service):
+    task_schedule = MagicMock(spec=TaskSchedule)
+    task_schedule.id = 1
+    task_schedule.unique_alias = "unique_alias"
+
+    service.delete_event(task_schedule)
+
+    service.scheduler_client.delete_schedule.assert_called_once_with(Name="unique_alias")

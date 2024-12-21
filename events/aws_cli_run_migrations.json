@@ -1,0 +1,7 @@
+{
+    "httpMethod": "POST",
+    "path": "/run_migrations",
+    "body": {
+        "keyword": "RUN_MIGRATIONS"
+    }
+}

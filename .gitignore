@@ -10,3 +10,6 @@ outputfile.txt
 .vscode/launch.json
 outputfile.txt
 .env
+.coverage
+.vscode/settings.json
+.env
