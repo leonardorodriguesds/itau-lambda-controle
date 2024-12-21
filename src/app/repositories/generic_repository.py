@@ -148,9 +148,19 @@ class GenericRepository(Generic[T]):
         """
         try:
             self.logger.debug(f"[{self.__class__.__name__}] Querying objects with filters: {filters}")
-            query = self.db_session.query(self.model)
+            query = self.db_session.query(self.model).filter_by(date_deleted=None)
             for attr, value in filters.items():
-                query = query.filter(getattr(self.model, attr) == value)
+                if '.' in attr:
+                    relation, column = attr.split('.')
+                    relationship_attr = getattr(self.model, relation, None)
+                    if not relationship_attr:
+                        raise AttributeError(f"Relacionamento '{relation}' não encontrado no modelo '{self.model.__name__}'.")
+                    
+                    related_model = relationship_attr.property.mapper.class_
+                    
+                    query = query.join(relationship_attr).filter(getattr(related_model, column) == value)
+                else:
+                    query = query.filter(getattr(self.model, attr) == value)
             return query.all()
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Error querying objects: {e}")

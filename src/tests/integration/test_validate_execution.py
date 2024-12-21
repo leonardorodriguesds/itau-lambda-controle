@@ -5,21 +5,37 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.app.models.base import Base  # Ajuste o import para onde estiver seu Base
+from src.app.models.base import Base  
 from lambda_function import lambda_handler
 from src.app.config.config import AppModule
 from src.app.models.table_execution import TableExecution
 from src.app.models.task_executor import TaskExecutor
 from src.app.provider.session_provider import SessionProvider
 from src.app.service.boto_service import BotoService
-from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService, MockSchedulerClient, MockStepFunctionClient
+from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService, MockEventsClient, MockGlueClient, MockLambdaClient, MockRequestsClient, MockSQSClient, MockSchedulerClient, MockStepFunctionClient
 from src.tests.providers.mock_session_provider import TestSessionProvider
 
 @pytest.fixture
 def mock_boto_service():
-    mock_scheduler_client = MockSchedulerClient()
-    mock_step_function_client = MockStepFunctionClient()
-    return MockBotoService(mock_scheduler_client, mock_step_function_client)
+    """
+    Retorna uma instância do MockBotoService contendo mocks para:
+      - Scheduler (EventBridge Scheduler)
+      - Step Functions
+      - SQS
+      - Glue
+      - Lambda
+      - EventBridge (Events)
+      - Requests (opcional, para o caso de api_process)
+    """
+    return MockBotoService(
+        mock_scheduler_client=MockSchedulerClient(),
+        step_function_client=MockStepFunctionClient(),
+        sqs_client=MockSQSClient(),
+        glue_client=MockGlueClient(),
+        lambda_client=MockLambdaClient(),
+        events_client=MockEventsClient(),
+        requests_client=MockRequestsClient()
+    )
 
 @pytest.fixture
 def db_session():
@@ -696,7 +712,23 @@ def test_add_table_and_register_executions(test_injector):
     
     assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
 
-def test_add_table_and_register_executions_and_trigger_process(test_injector, mock_boto_service):
+@pytest.mark.parametrize(
+    "executor_method, identification",
+    [
+        ("stepfunction_process", "arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine"),
+        ("sqs_process", "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"),
+        ("glue_process", "my-glue-job-name"),
+        ("lambda_process", "arn:aws:lambda:us-east-1:123456789012:function:my-lambda"),
+        ("eventbridge_process", "my.event.source"),
+        ("api_process", "https://fake.api/my-endpoint"),
+    ],
+)
+def test_add_table_and_register_executions_and_trigger_process(
+    test_injector, 
+    mock_boto_service,
+    executor_method,
+    identification
+):
     event = {
         "httpMethod": "POST",
         "path": "/add_table",
@@ -813,7 +845,7 @@ def test_add_table_and_register_executions_and_trigger_process(test_injector, mo
                     ],
                     "tasks": [
                         {
-                            "task_executor": "step_function_executor",
+                            "task_executor": "mock_executor",
                             "alias": "op_enriquecido_step_function_executor",
                             "params": {
                                 "table_name": "{{table.name}}",
@@ -832,7 +864,9 @@ def test_add_table_and_register_executions_and_trigger_process(test_injector, mo
     session = session_provider.get_session()
 
     from src.app.models.task_executor import TaskExecutor
-    task_execution = TaskExecutor(alias="step_function_executor", method="stepfunction_process", identification="arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine")
+    
+    task_execution = TaskExecutor(alias="mock_executor", method=executor_method, identification=identification)
+    
     session.add(task_execution)
 
     response = lambda_handler(
@@ -879,7 +913,7 @@ def test_add_table_and_register_executions_and_trigger_process(test_injector, mo
 
     saved_task = session.query(TaskTable).filter_by(alias='op_enriquecido_step_function_executor').first()
     assert saved_task is not None
-    assert saved_task.task_executor.alias == "step_function_executor"
+    assert saved_task.task_executor.alias == "mock_executor"
     assert saved_task.debounce_seconds == 30
 
     register_event = {
@@ -1023,14 +1057,11 @@ def test_add_table_and_register_executions_and_trigger_process(test_injector, mo
     
     assert trigger_response["statusCode"] == 200
     
-    mock_step_function_client = mock_boto_service.get_client('stepfunctions')
-    _, first_value = next(iter(mock_step_function_client._executions.items()))
-    
-    table_tb_op_enriquecido = session.query(Tables).filter_by(name="tb_op_enriquecido").first()
-    
-    exptected_input = {
+    table_tb_teste = session.query(Tables).filter_by(name="tb_op_enriquecido").first()
+        
+    expected_input = {
         "execution_id": execution_id,
-        "table_id": table_tb_op_enriquecido.id,
+        "table_id": table_tb_teste.id,
         "source": execution_source,
         "date_time": ANY,
         "payload": {
@@ -1040,5 +1071,90 @@ def test_add_table_and_register_executions_and_trigger_process(test_injector, mo
         }
     }
     
-    assert first_value["stateMachineArn"] == task_execution.identification
-    assert json.loads(first_value["input"]) == exptected_input
+    if executor_method == "stepfunction_process":
+        mock_step_function_client = mock_boto_service.get_client('stepfunctions')
+        assert len(mock_step_function_client._executions) == 1, (
+            "Esperava 1 execução de StepFunction, encontrou 0"
+        )
+        execution_name, exec_info = next(iter(mock_step_function_client._executions.items()))
+        
+        assert exec_info["stateMachineArn"] == identification, (
+            f"ARN incorreto. Esperava={identification}, obteve={exec_info['stateMachineArn']}"
+        )
+        assert json.loads(exec_info["input"]) == expected_input, (
+            f"Input incorreto. Esperava={expected_input}, obteve={json.loads(exec_info['input'])}"
+        )
+
+    elif executor_method == "sqs_process":
+        mock_sqs_client = mock_boto_service.get_client('sqs')
+        assert len(mock_sqs_client._messages) == 1, (
+            "Esperava 1 mensagem enviada ao SQS, encontrou 0"
+        )
+        message = mock_sqs_client._messages[0]
+        assert message["QueueUrl"] == identification, (
+            f"QueueUrl incorreto. Esperava={identification}, obteve={message['QueueUrl']}"
+        )
+        body = json.loads(message["MessageBody"])
+        assert body == expected_input, (
+            f"MessageBody incorreto. Esperava={expected_input}, obteve={body}"
+        )
+
+    elif executor_method == "glue_process":
+        mock_glue_client = mock_boto_service.get_client('glue')
+        assert len(mock_glue_client._job_runs) == 1, (
+            "Esperava 1 job run do Glue, encontrou 0"
+        )
+        job_run = mock_glue_client._job_runs[0]
+        assert job_run["JobName"] == identification, (
+            f"JobName incorreto. Esperava={identification}, obteve={job_run['JobName']}"
+        )
+        assert job_run["Arguments"]["payload"] == expected_input["payload"], (
+            f"Arguments payload incorreto. Esperava={expected_input['payload']}, obteve={job_run['Arguments']['payload']}"
+        )
+
+    elif executor_method == "lambda_process":
+        mock_lambda_client = mock_boto_service.get_client('lambda')
+        assert len(mock_lambda_client._invocations) == 1, (
+            "Esperava 1 invocação de Lambda, encontrou 0"
+        )
+        invocation = mock_lambda_client._invocations[0]
+        assert invocation["FunctionName"] == identification, (
+            f"FunctionName incorreto. Esperava={identification}, obteve={invocation['FunctionName']}"
+        )
+        payload_dict = json.loads(invocation["Payload"])
+        assert payload_dict == expected_input, (
+            f"Payload da Lambda incorreto. Esperava={expected_input}, obteve={payload_dict}"
+        )
+
+    elif executor_method == "eventbridge_process":
+        mock_events_client = mock_boto_service.get_client('events')
+        assert len(mock_events_client._put_events) == 1, (
+            "Esperava 1 evento publicado no EventBridge, encontrou 0"
+        )
+        event_entry = mock_events_client._put_events[0]
+        assert event_entry["Source"] == identification, (
+            f"Source do evento incorreto. Esperava={identification}, obteve={event_entry['Source']}"
+        )
+        detail = json.loads(event_entry["Detail"])
+        assert detail == expected_input, (
+            f"Detail do evento incorreto. Esperava={expected_input}, obteve={detail}"
+        )
+
+    elif executor_method == "api_process":
+        mock_requests_client = mock_boto_service.get_client('requests')
+        assert len(mock_requests_client._posts) == 1, (
+            "Esperava 1 chamada HTTP via requests.post, encontrou 0"
+        )
+        post_call = mock_requests_client._posts[0]
+        assert post_call["url"] == identification, (
+            f"URL da chamada API incorreto. Esperava={identification}, obteve={post_call['url']}"
+        )
+        sent_json = post_call["json"]
+        assert sent_json == expected_input, (
+            f"JSON enviado para API incorreto. Esperava={expected_input}, obteve={sent_json}"
+        )
+
+    else:
+        pytest.fail(f"Executor method desconhecido: {executor_method}")
+
+    print(f"Teste para {executor_method} passou com sucesso")

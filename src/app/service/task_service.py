@@ -1,6 +1,7 @@
 from datetime import datetime
 from injector import inject
 from jinja2 import Template
+import requests
 from src.app.config.constants import STATIC_SCHEDULE_IN_PROGRESS, STATIC_SCHEDULE_PENDENT
 from src.app.models.task_schedule import TaskSchedule
 from src.app.service.task_schedule_service import TaskScheduleService
@@ -23,6 +24,7 @@ class TaskService:
     """
     Serviço responsável por gerenciar e acionar tabelas com base em suas dependências e configurações de execução.
     """
+
     @inject
     def __init__(
             self, 
@@ -50,7 +52,6 @@ class TaskService:
 
         :param task_table_id: ID da tabela da tarefa a ser executada.
         :param dependency_execution_id: ID da execução da dependência.
-        :param current_partitions: Dicionário contendo partições atuais (opcional).
         """
         start_time = datetime.utcnow()
         self.logger.info(f"[{self.__class__.__name__}] Trigger iniciado para task_table_id: {task_table_id}, dependency_execution_id: {dependency_execution_id}")
@@ -89,6 +90,7 @@ class TaskService:
         except Exception as e:
             self.logger.exception(f"[{self.__class__.__name__}] Erro ao acionar tabelas: {str(e)}")
             self.cloudwatch_service.add_metric("TriggerTablesErrorCount", 1, "Count")
+            raise
 
         finally:
             execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
@@ -130,7 +132,7 @@ class TaskService:
             task: TaskExecutor = task_table.task_executor
             table_info = transform_to_table_exec_dto(execution, dependencies_partitions)
                 
-            self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Parâmetros da tarefa: {task_table.params}({type (task_table.params)})")
+            self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Parâmetros da tarefa: {task_table.params}({type(task_table.params)})")
 
             payload = self._interpolate_payload(
                 task_table.params,
@@ -157,14 +159,14 @@ class TaskService:
                 response = method_map[task.method](task_table, execution, payload, task)
                 self.cloudwatch_service.add_metric(f"{task.method.capitalize()}Count", 1, "Count")
 
-                if response.get("ExecutionArn"):
-                    self.logger.info(f"[{self.__class__.__name__}][{task_table.table.name}] Processamento iniciado: {response['ExecutionArn']}")
+                if response:
+                    self.logger.info(f"[{self.__class__.__name__}][{task_table.table.name}] Processamento iniciado: {response}")
 
                     self.task_schedule_service.save({
                         "id": task_schedule.id,
                         "unique_alias": task_schedule.unique_alias,
                         "status": STATIC_SCHEDULE_IN_PROGRESS,
-                        "execution_arn": response["ExecutionArn"]
+                        "execution_arn": response.get("identification", None),
                     })
             else:
                 self.logger.error(f"[{self.__class__.__name__}][{task_table.table.name}] Método de processamento desconhecido: {task.method}")
@@ -173,7 +175,7 @@ class TaskService:
         except Exception as e:
             self.logger.exception(f"[{self.__class__.__name__}][{task_table.table.name}] Erro no processamento: {str(e)}")
             self.cloudwatch_service.add_metric("ProcessingErrors", 1, "Count")
-
+            raise
 
     def _interpolate_payload(self, payload: Optional[dict], **kwargs) -> dict:
         """
@@ -195,14 +197,15 @@ class TaskService:
             self.logger.exception(f"[{self.__class__.__name__}] Erro ao interpolar payload: {e}")
             raise
 
-
-    def stepfunction_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+    def stepfunction_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
         """
         Chama uma Step Function enviando um payload JSON.
 
+        :param task_table: Instância da tabela de tarefa associada.
         :param execution: Instância da execução associada.
         :param payload: O payload JSON a ser enviado para a Step Function.
-        :param stepfunction_arn: O ARN da Step Function que será invocada.
+        :param task_executor: Instância do TaskExecutor configurado.
+        :return: Dicionário com status_code, identification e outros dados relevantes.
         """
         try:
             self.logger.debug(f"[{self.__class__.__name__}] Invoking Step Function [{task_executor.identification}] for execution: [{execution.id}]")
@@ -228,13 +231,31 @@ class TaskService:
             )
 
             self.logger.info(f"Step Function invoked successfully: {response['executionArn']}")
-            return response
+
+            return {
+                "status_code": 200,
+                "identification": response.get("executionArn"),
+                "response": response 
+            }
 
         except Exception as e:
             self.logger.error(f"Error invoking Step Function: {e}")
-            raise
-        
-    def sqs_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+            return {
+                "status_code": 500,
+                "identification": None,
+                "error": str(e)
+            }
+
+    def sqs_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+        """
+        Envia uma mensagem para uma fila SQS.
+
+        :param task_table: Instância da tabela de tarefa associada.
+        :param execution: Instância da execução associada.
+        :param payload: O payload JSON a ser enviado para a SQS.
+        :param task_executor: Instância do TaskExecutor configurado.
+        :return: Dicionário com status_code, identification e outros dados relevantes.
+        """
         try:
             sqs_client = self.boto_service.get_client('sqs')
             payload_with_metadata = {
@@ -249,11 +270,31 @@ class TaskService:
                 MessageBody=json.dumps(payload_with_metadata)
             )
             self.logger.info(f"SQS message sent successfully: {response['MessageId']}")
+
+            return {
+                "status_code": 200,
+                "identification": task_executor.identification, 
+                "MessageId": response.get("MessageId"),
+                "response": response  
+            }
         except Exception as e:
             self.logger.error(f"Error sending SQS message: {e}")
-            raise
-        
-    def glue_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+            return {
+                "status_code": 500,
+                "identification": None,
+                "error": str(e)
+            }
+
+    def glue_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+        """
+        Inicia um job do AWS Glue com um payload específico.
+
+        :param task_table: Instância da tabela de tarefa associada.
+        :param execution: Instância da execução associada.
+        :param payload: O payload JSON a ser enviado para o Glue.
+        :param task_executor: Instância do TaskExecutor configurado.
+        :return: Dicionário com status_code, identification e outros dados relevantes.
+        """
         try:
             glue_client = self.boto_service.get_client('glue')
             payload_with_metadata = {
@@ -268,11 +309,31 @@ class TaskService:
                 Arguments=payload_with_metadata
             )
             self.logger.info(f"Glue job started successfully: {response['JobRunId']}")
+
+            return {
+                "status_code": 200,
+                "identification": task_executor.identification,  
+                "JobRunId": response.get("JobRunId"),
+                "response": response  
+            }
         except Exception as e:
             self.logger.error(f"Error starting Glue job: {e}")
-            raise
-        
-    def lambda_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+            return {
+                "status_code": 500,
+                "identification": None,
+                "error": str(e)
+            }
+
+    def lambda_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+        """
+        Invoca uma função Lambda com um payload específico.
+
+        :param task_table: Instância da tabela de tarefa associada.
+        :param execution: Instância da execução associada.
+        :param payload: O payload JSON a ser enviado para a Lambda.
+        :param task_executor: Instância do TaskExecutor configurado.
+        :return: Dicionário com status_code, identification e outros dados relevantes.
+        """
         try:
             lambda_client = self.boto_service.get_client('lambda')
             payload_with_metadata = {
@@ -288,11 +349,30 @@ class TaskService:
                 Payload=json.dumps(payload_with_metadata)
             )
             self.logger.info(f"Lambda function invoked successfully: {response['StatusCode']}")
+
+            return {
+                "status_code": response.get("StatusCode", 200),
+                "identification": task_executor.identification,  
+                "response": response  
+            }
         except Exception as e:
             self.logger.error(f"Error invoking Lambda function: {e}")
-            raise
+            return {
+                "status_code": 500,
+                "identification": None,
+                "error": str(e)
+            }
 
-    def eventbridge_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+    def eventbridge_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+        """
+        Envia um evento para o AWS EventBridge com um payload específico.
+
+        :param task_table: Instância da tabela de tarefa associada.
+        :param execution: Instância da execução associada.
+        :param payload: O payload JSON a ser enviado para o EventBridge.
+        :param task_executor: Instância do TaskExecutor configurado.
+        :return: Dicionário com status_code, identification e outros dados relevantes.
+        """
         try:
             eventbridge_client = self.boto_service.get_client('events')
             payload_with_metadata = {
@@ -312,14 +392,33 @@ class TaskService:
                 ]
             )
             self.logger.info(f"EventBridge event sent successfully: {response['Entries']}")
+
+            return {
+                "status_code": 200,
+                "identification": task_executor.identification, 
+                "Entries": response.get("Entries", []),
+                "response": response  
+            }
         except Exception as e:
             self.logger.error(f"Error sending EventBridge event: {e}")
-            raise
+            return {
+                "status_code": 500,
+                "identification": None,
+                "error": str(e)
+            }
 
-    def api_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+    def api_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+        """
+        Faz uma chamada HTTP POST para uma API externa com um payload específico.
+
+        :param task_table: Instância da tabela de tarefa associada.
+        :param execution: Instância da execução associada.
+        :param payload: O payload JSON a ser enviado para a API.
+        :param task_executor: Instância do TaskExecutor configurado.
+        :return: Dicionário com status_code, identification e outros dados relevantes.
+        """
         try:
-            import requests
-            
+            requests_client: requests = self.boto_service.get_client('requests')            
             payload_with_metadata = {
                 "execution_id": execution.id,
                 "table_id": task_table.table.id,
@@ -327,9 +426,25 @@ class TaskService:
                 "date_time": execution.date_time.isoformat(),
                 "payload": payload 
             }
-            response = requests.post(task_executor.identification, json=payload_with_metadata)
+            response = requests_client.post(task_executor.identification, json=payload_with_metadata)
             response.raise_for_status()
             self.logger.info(f"API called successfully: {response.status_code}")
+
+            try:
+                response_json = response.json()
+            except ValueError:
+                response_json = {}
+
+            return {
+                "status_code": response.status_code,
+                "identification": task_executor.identification, 
+                "response_data": response_json,
+                "response": response 
+            }
         except Exception as e:
             self.logger.error(f"Error calling API: {e}")
-            raise
+            return {
+                "status_code": 500,
+                "identification": task_executor.identification,  
+                "error": str(e)
+            }

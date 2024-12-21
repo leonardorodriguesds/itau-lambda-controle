@@ -1,165 +1,293 @@
 import pytest
-from unittest.mock import Mock, MagicMock
-from sqlalchemy import Column, DateTime, Integer
-from sqlalchemy.orm import Session
-from logging import Logger
+from unittest.mock import MagicMock
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, DateTime, create_engine
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 
+from src.app.models.base import Base 
 from src.app.repositories.generic_repository import GenericRepository
 
-class TestGenericRepository:
-    @pytest.fixture
-    def mock_session(self):
-        return Mock(spec=Session)
+class User(Base):
+    __tablename__ = 'users'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+    date_deleted = Column(DateTime, nullable=True)
+    
+    posts = relationship("Post", back_populates="user")
 
-    @pytest.fixture
-    def mock_logger(self):
-        return Mock(spec=Logger)
+    def __repr__(self):
+        return f"<User(id={self.id}, name='{self.name}', email='{self.email}')>"
 
-    @pytest.fixture
-    def mock_model(self):
-        class MockModel:
-            id = Column(Integer, primary_key=True)
-            date_deleted = Column(DateTime, nullable=True)
-        return MockModel
+class Post(Base):
+    __tablename__ = 'posts'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String, nullable=False)
+    content = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    date_deleted = Column(DateTime, nullable=True)
+    
+    user = relationship("User", back_populates="posts")
 
+    def __repr__(self):
+        return f"<Post(id={self.id}, title='{self.title}', user_id={self.user_id})>"
 
-    @pytest.fixture
-    def repository(self, mock_session, mock_model, mock_logger):
-        return GenericRepository(mock_session, mock_model, mock_logger)
+@pytest.fixture
+def db_session():
+    engine = create_engine("sqlite:///:memory:", echo=False)
+    Base.metadata.create_all(engine)
 
-    def test_save_new_object(self, repository, mock_session, mock_logger, mock_model):
-        obj = mock_model()
-        obj.id = None
+    SessionLocal = sessionmaker(bind=engine)
+    session = SessionLocal()
 
-        repository.save(obj)
+    yield session
 
-        mock_session.add.assert_called_once_with(obj)
-        mock_session.flush.assert_called_once()
-        mock_logger.debug.assert_any_call(f"[{repository.__class__.__name__}] Saving object: [{obj.__dict__}]")
+    session.close()
+    Base.metadata.drop_all(engine)
 
-    def test_save_existing_object(self, repository, mock_session, mock_logger, mock_model):
-        obj = mock_model()
-        obj.id = 1
+@pytest.fixture
+def mock_logger(mocker):
+    return mocker.MagicMock()
 
-        repository.save(obj)
+@pytest.fixture
+def user_repository(db_session, mock_logger):
+    return GenericRepository[User](db_session=db_session, model=User, logger=mock_logger)
 
-        mock_session.merge.assert_called_once_with(obj)
-        mock_session.flush.assert_called_once()
+@pytest.fixture
+def post_repository(db_session, mock_logger):
+    return GenericRepository[Post](db_session=db_session, model=Post, logger=mock_logger)
 
-    def test_get_by_id(self, repository, mock_session, mock_model):
-        mock_query = Mock()
-        mock_session.query.return_value.filter.return_value = mock_query
-        mock_query.first.return_value = "mocked_object"
+def test_save_new_object(user_repository, db_session, mock_logger):
+    new_user = User(name="John Doe", email="john@example.com")
+    saved_user = user_repository.save(new_user)
+    
+    assert saved_user.id is not None
+    assert saved_user.name == "John Doe"
+    assert saved_user.email == "john@example.com"
+    
+    retrieved_user = db_session.query(User).filter_by(id=saved_user.id).first()
+    assert retrieved_user is not None
+    assert retrieved_user.name == "John Doe"
 
-        result = repository.get_by_id(1)
+def test_save_existing_object(user_repository, db_session, mock_logger):
+    existing_user = User(name="Jane Doe", email="jane@example.com")
+    db_session.add(existing_user)
+    db_session.flush()
+    user_id = existing_user.id
 
-        mock_session.query.assert_called_once_with(mock_model)
-        mock_session.query.return_value.filter.assert_called_once()
-        assert result == "mocked_object"
+    existing_user.name = "Jane Smith"
+    saved_user = user_repository.save(existing_user)
 
-    def test_get_all(self, repository, mock_session, mock_model):
-        mock_query = Mock()
-        mock_session.query.return_value.filter.return_value = mock_query
-        mock_query.all.return_value = ["object1", "object2"]
+    assert saved_user.id == user_id
+    assert saved_user.name == "Jane Smith"
 
-        result = repository.get_all()
+    retrieved_user = db_session.query(User).filter_by(id=user_id).first()
+    assert retrieved_user.name == "Jane Smith"
 
-        mock_session.query.assert_called_once_with(mock_model)
-        mock_session.query.return_value.filter.assert_called_once()
-        assert result == ["object1", "object2"]
+def test_get_by_id_found(user_repository, db_session, mock_logger):
+    user = User(name="Alice", email="alice@example.com")
+    db_session.add(user)
+    db_session.flush()
+    user_id = user.id
 
-    def test_update(self, repository, mock_session, mock_model):
-        obj = mock_model()
-        repository.get_by_id = Mock(return_value=obj)
+    result = user_repository.get_by_id(user_id)
 
-        merged_obj = Mock()
-        mock_session.merge.return_value = merged_obj
+    assert result is not None
+    assert result.id == user_id
+    assert result.name == "Alice"
 
-        updated_data = {"field": "value"}
-        result = repository.update(1, updated_data)
+def test_get_by_id_not_found(user_repository, db_session, mock_logger):
+    result = user_repository.get_by_id(999)
 
-        mock_session.merge.assert_called_once_with(obj)
-        mock_session.flush.assert_called_once()
+    assert result is None
 
-        assert result == merged_obj
+def test_get_all(user_repository, db_session, mock_logger):
+    users = [
+        User(name="User1", email="user1@example.com"),
+        User(name="User2", email="user2@example.com"),
+        User(name="User3", email="user3@example.com", date_deleted=datetime.now())
+    ]
+    db_session.add_all(users)
+    db_session.flush()
 
+    result = user_repository.get_all()
 
-    def test_hard_delete(self, repository, mock_session, mock_model):
-        obj = mock_model()
-        repository.get_by_id = Mock(return_value=obj)
+    assert len(result) == 2
+    assert all(user.date_deleted is None for user in result)
 
-        result = repository.hard_delete(1)
+def test_update_existing_object(user_repository, db_session, mock_logger):
+    user = User(name="Bob", email="bob@example.com")
+    db_session.add(user)
+    db_session.flush()
+    user_id = user.id
 
-        mock_session.delete.assert_called_once_with(obj)
-        assert result is True
+    updated_data = {"name": "Bobby", "email": "bobby@example.com"}
+    updated_user = user_repository.update(user_id, updated_data)
 
-    def test_soft_delete(self, repository, mock_session, mock_model):
-        obj = mock_model()
-        repository.get_by_id = Mock(return_value=obj)
+    assert updated_user is not None
+    assert updated_user.name == "Bobby"
+    assert updated_user.email == "bobby@example.com"
 
-        result = repository.soft_delete(1)
+    retrieved_user = db_session.query(User).filter_by(id=user_id).first()
+    assert retrieved_user.name == "Bobby"
+    assert retrieved_user.email == "bobby@example.com"
 
-        assert obj.date_deleted is not None
-        mock_session.merge.assert_called_once_with(obj)
-        mock_session.flush.assert_called_once()
-        assert result is True
+def test_update_nonexistent_object(user_repository, db_session, mock_logger):
+    updated_data = {"name": "Nonexistent"}
+    result = user_repository.update(999, updated_data)
 
-    def test_hard_delete_not_found(self, repository, mock_session, mock_model):
-        repository.get_by_id = Mock(return_value=None)
+    assert result is None
 
-        result = repository.hard_delete(1)
+def test_hard_delete_existing_object(user_repository, db_session, mock_logger):
+    user = User(name="Charlie", email="charlie@example.com")
+    db_session.add(user)
+    db_session.flush()
+    user_id = user.id
 
-        mock_session.delete.assert_not_called()
-        assert result is False
-        
-    def test_soft_delete_not_found(self, repository, mock_session, mock_model):
-        repository.get_by_id = Mock(return_value=None)
+    result = user_repository.hard_delete(user_id)
 
-        result = repository.soft_delete(1)
+    assert result is True
 
-        mock_session.merge.assert_not_called()
-        assert result is False
-        
-    def test_save_with_id_should_call_update(self, repository, mock_session, mock_model):
-        obj = mock_model()
-        obj.id = 1
+    retrieved_user = db_session.query(User).filter_by(id=user_id).first()
+    assert retrieved_user is None
 
-        repository.get_by_id = Mock(return_value=obj)
-        repository.save(obj)
+def test_hard_delete_nonexistent_object(user_repository, db_session, mock_logger):
+    result = user_repository.hard_delete(999)
 
-        mock_session.merge.assert_called_once_with(obj)
-        mock_session.flush.assert_called_once()
-        
-    def test_save_without_id_should_call_add(self, repository, mock_session, mock_model):
-        obj = mock_model()
-        obj.id = None
+    assert result is False
 
-        repository.save(obj)
+def test_soft_delete_existing_object(user_repository, db_session, mock_logger):
+    user = User(name="Diana", email="diana@example.com")
+    db_session.add(user)
+    db_session.flush()
+    user_id = user.id
 
-        mock_session.add.assert_called_once_with(obj)
-        mock_session.flush.assert_called_once()
-        
-    def test_get_by_id_with_date_deleted(self, repository, mock_session, mock_model):
-        mock_query = Mock()
-        mock_model.date_deleted = Column(DateTime, nullable=True)
-        mock_session.query.return_value.filter.return_value = mock_query
-        mock_query.first.return_value = None
+    result = user_repository.soft_delete(user_id)
 
-        result = repository.get_by_id(1)
+    assert result is True
 
-        mock_session.query.assert_called_once_with(mock_model)
-        mock_session.query.return_value.filter.assert_called_once()
-        assert result is None
-        
-    def test_get_all_with_date_deleted(self, repository, mock_session, mock_model):
-        mock_query = Mock()
-        mock_model.date_deleted = Column(DateTime, nullable=True)
-        mock_session.query.return_value.filter.return_value = mock_query
-        mock_query.all.return_value = []
+    retrieved_user = db_session.query(User).filter_by(id=user_id).first()
+    assert retrieved_user is not None
+    assert retrieved_user.date_deleted is not None
 
-        result = repository.get_all()
+def test_soft_delete_nonexistent_object(user_repository, db_session, mock_logger):
+    result = user_repository.soft_delete(999)
 
-        mock_session.query.assert_called_once_with(mock_model)
-        mock_session.query.return_value.filter.assert_called_once()
-        assert result == []
+    assert result is False
+
+def test_query_with_filters(user_repository, db_session, mock_logger):
+    users = [
+        User(name="Eve", email="eve@example.com"),
+        User(name="Eve", email="eve2@example.com"),
+        User(name="Frank", email="frank@example.com")
+    ]
+    db_session.add_all(users)
+    db_session.flush()
+
+    posts = [
+        Post(title="Post1", content="Content1", user_id=users[0].id),
+        Post(title="Post2", content="Content2", user_id=users[0].id, date_deleted=datetime.now()),
+        Post(title="Post3", content="Content3", user_id=users[1].id)
+    ]
+    db_session.add_all(posts)
+    db_session.flush()
+
+    filters = {"name": "Eve"}
+    result = user_repository.query(**filters)
+
+    assert len(result) == 2
+    assert all(user.name == "Eve" for user in result)
+
+def test_flush(user_repository, db_session, mock_logger):
+    user = User(name="Grace", email="grace@example.com")
+    db_session.add(user)
+
+    user_repository.flush()
+
+    retrieved_user = db_session.query(User).filter_by(email="grace@example.com").first()
+    assert retrieved_user is not None
+
+def test_save_exception(user_repository, db_session, mock_logger):
+    user1 = User(name="Henry", email="henry@example.com")
+    db_session.add(user1)
+    db_session.flush()
+
+    user2 = User(name="Henry II", email="henry@example.com")
+
+    with pytest.raises(Exception) as exc_info:
+        user_repository.save(user2)
+
+    assert "UNIQUE constraint failed" in str(exc_info.value)
+
+    mock_logger.error.assert_called()
+    error_call_args = mock_logger.error.call_args[0][0]
+    assert "Error saving object" in error_call_args
+
+def test_get_by_id_exception(user_repository, db_session, mock_logger, mocker):
+    mocker.patch.object(db_session, 'query', side_effect=Exception("Query error"))
+
+    with pytest.raises(Exception) as exc_info:
+        user_repository.get_by_id(1)
+
+    assert str(exc_info.value) == "Query error"
+
+def test_complex_query(post_repository, db_session, mock_logger):
+    # Criar usuários
+    user1 = User(name="User1", email="user1@example.com")
+    user2 = User(name="User2", email="user2@example.com")
+    user3 = User(name="User3", email="user3@example.com", date_deleted=datetime.now())  
+
+    db_session.add_all([user1, user2, user3])
+    db_session.flush()
+
+    post1 = Post(title="Post1", content="Content1", user_id=user1.id)
+    post2 = Post(title="Post2", content="Content2", user_id=user1.id, date_deleted=datetime.now())  
+    post3 = Post(title="Post3", content="Content3", user_id=user2.id)
+    post4 = Post(title="Post4", content="Content4", user_id=user2.id)
+    post5 = Post(title="Post5", content="Content5", user_id=user3.id)
+
+    db_session.add_all([post1, post2, post3, post4, post5])
+    db_session.flush()
+
+    filters = {
+        "user.name": "User1",
+        "title": "Post1"
+    }
+
+    result = post_repository.query(**filters)
+
+    assert len(result) == 1
+    assert result[0].title == "Post1"
+    assert result[0].user.name == "User1"
+
+def test_get_by_id_soft_deleted(user_repository, db_session, mock_logger):
+    user = User(name="SoftDeletedUser", email="softdeleted@example.com", date_deleted=datetime.now())
+    db_session.add(user)
+    db_session.flush()
+    user_id = user.id
+
+    result = user_repository.get_by_id(user_id)
+
+    assert result is None
+
+def test_query_excludes_soft_deleted(post_repository, db_session, mock_logger):
+    user1 = User(name="ActiveUser", email="active@example.com")
+    user2 = User(name="SoftDeletedUser", email="softdeleted@example.com", date_deleted=datetime.now())
+
+    db_session.add_all([user1, user2])
+    db_session.flush()
+
+    post1 = Post(title="ActivePost", content="Active Content", user_id=user1.id)
+    post2 = Post(title="SoftDeletedPost", content="Soft Deleted Content", user_id=user1.id, date_deleted=datetime.now())
+
+    db_session.add_all([post1, post2])
+    db_session.flush()
+
+    result = post_repository.query()
+
+    assert len(result) == 1
+    assert result[0].title == "ActivePost"

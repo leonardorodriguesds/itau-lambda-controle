@@ -4,6 +4,8 @@ from logging import Logger
 from injector import inject
 from typing import Optional
 
+import requests
+
 
 class BotoService:
     @inject
@@ -18,6 +20,10 @@ class BotoService:
         Retorna um client do Boto3 para o serviço especificado. Reutiliza instâncias existentes para otimizar.
         Inclui suporte para LocalStack ao usar a variável LOCALSTACK_HOST.
         """
+        if service_name == "requests":
+            self.logger.debug("Returning 'requests' client instead of Boto3.")
+            return requests
+        
         key = (service_name, region_name)
         if key not in self._clients:
             endpoint_url = self._get_localstack_endpoint(service_name)
