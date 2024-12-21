@@ -2,7 +2,7 @@ from logging import Logger
 from typing import Optional
 
 from injector import inject
-from src.app.models.task_executor import TaskExecutor
+from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 from src.app.repositories.task_executor_repository import TaskExecutorRepository
 
 class TaskExecutorService:
@@ -16,12 +16,12 @@ class TaskExecutorService:
         if task_executor_id:
             task_executor = self.repository.get_by_id(task_executor_id)
             if not task_executor:
-                raise Exception(f"Task executor with id [{task_executor_id}] not found.")
+                raise NotFoundError(f"Task executor with id [{task_executor_id}] not found.")
             return task_executor
         elif alias:
             task_executor = self.repository.get_by_alias(alias)
             if not task_executor:
-                raise Exception(f"Task executor with alias [{alias}] not found.")
+                raise NotFoundError(f"Task executor with alias [{alias}] not found.")
             return task_executor
         else:
             raise Exception("Task executor id or alias is required.")

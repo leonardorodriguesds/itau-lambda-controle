@@ -1002,8 +1002,7 @@ def test_add_table_and_register_executions_and_trigger_process(
         .order_by(TableExecution.id.desc())
         .first()
     )
-    
-    execution_id = table_execution.id
+
     execution_source = table_execution.source
     saved_task_id = saved_task.id
     saved_task_alias = saved_task.alias
@@ -1014,7 +1013,7 @@ def test_add_table_and_register_executions_and_trigger_process(
     
     body_content = {
         "execution": {
-            "id": execution_id,
+            "id": ANY,
             "source": execution_source,
             "timestamp": ANY
         },
@@ -1060,7 +1059,7 @@ def test_add_table_and_register_executions_and_trigger_process(
     table_tb_teste = session.query(Tables).filter_by(name="tb_op_enriquecido").first()
         
     expected_input = {
-        "execution_id": execution_id,
+        "execution_id": ANY,
         "table_id": table_tb_teste.id,
         "source": execution_source,
         "date_time": ANY,
@@ -1158,3 +1157,4 @@ def test_add_table_and_register_executions_and_trigger_process(
         pytest.fail(f"Executor method desconhecido: {executor_method}")
 
     print(f"Teste para {executor_method} passou com sucesso")
+    

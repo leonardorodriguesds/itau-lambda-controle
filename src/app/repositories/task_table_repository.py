@@ -11,3 +11,6 @@ class TaskTableRepository(GenericRepository[TaskTable]):
         super().__init__(session_provider.get_session(), TaskTable, logger)
         self.session = session_provider.get_session()
         self.logger = logger
+        
+    def get_by_alias(self, alias: str) -> TaskTable:
+        return self.session.query(TaskTable).filter(TaskTable.alias == alias).first()

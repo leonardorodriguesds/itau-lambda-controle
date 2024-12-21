@@ -3,6 +3,7 @@ from logging import Logger
 from typing import List, Optional
 
 from injector import inject
+from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 from src.app.service.task_table_service import TaskTableService
 from src.app.service.table_execution_service import TableExecutionService
 from src.app.models.dto.table_dto import TableDTO
@@ -37,15 +38,15 @@ class TableService:
         if table_id:
             table = self.table_repository.get_by_id(table_id)
             if not table:
-                raise TableInsertError(f"Table with id [{table_id}] not found.")
+                raise NotFoundError(f"Table with id [{table_id}] not found.")
             return table
         elif table_name:
             table = self.table_repository.get_by_name(table_name)
             if not table:
-                raise TableInsertError(f"Table with name {table_name} not found.")
+                raise NotFoundError(f"Table with name {table_name} not found.")
             return table
         else:
-            raise TableInsertError("Table id or name is required.")
+            raise RuntimeError("Table id or name is required.")
 
     def save_table(self, table_dto: TableDTO, user: str):
         self.logger.debug(f"[{self.__class__.__name__}] Saving table: [{table_dto}]")

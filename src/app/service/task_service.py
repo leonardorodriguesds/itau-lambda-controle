@@ -3,6 +3,7 @@ from injector import inject
 from jinja2 import Template
 import requests
 from src.app.config.constants import STATIC_SCHEDULE_IN_PROGRESS, STATIC_SCHEDULE_PENDENT
+from src.app.models.dto.trigger_process_dto import TriggerProcess
 from src.app.models.task_schedule import TaskSchedule
 from src.app.service.task_schedule_service import TaskScheduleService
 from src.app.service.boto_service import BotoService
@@ -45,6 +46,30 @@ class TaskService:
         self.task_table_service = task_table_service
         self.boto_service = boto_service
         self.task_schedule_service = task_schedule_service
+        
+    def run(self, trigger_process: TriggerProcess):
+        """
+        Aciona a execução de tabelas com base nas dependências e nas partições fornecidas.
+
+        :param trigger_process: Dicionário com informações de acionamento.
+        """
+        try:
+            task_table = self.task_table_service.find(
+                task_id=trigger_process.task_id,
+                task_name=trigger_process.task_name
+            )
+            last_execution = self.table_execution_service.get_latest_execution(task_table.table_id)
+            
+            partitions_dict = {
+                p.partition.name: p.value
+                for p in self.table_partition_exec_service.get_by_execution(last_execution.id)
+            }
+            
+            self.process(None, task_table, last_execution, partitions_dict, trigger_process.params)
+        except Exception as e:
+            self.logger.exception(f"[{self.__class__.__name__}] Erro ao acionar tabelas: {str(e)}")
+            self.cloudwatch_service.add_metric("TriggerTablesErrorCount", 1, "Count")
+            raise
 
     def trigger_tables(self, task_schedule_id: int, task_table_id: int, dependency_execution_id: int):
         """
@@ -53,8 +78,6 @@ class TaskService:
         :param task_table_id: ID da tabela da tarefa a ser executada.
         :param dependency_execution_id: ID da execução da dependência.
         """
-        start_time = datetime.utcnow()
-        self.logger.info(f"[{self.__class__.__name__}] Trigger iniciado para task_table_id: {task_table_id}, dependency_execution_id: {dependency_execution_id}")
         try:
             task_schedule_list = self.task_schedule_service.query(
                 id=task_schedule_id,
@@ -92,11 +115,6 @@ class TaskService:
             self.cloudwatch_service.add_metric("TriggerTablesErrorCount", 1, "Count")
             raise
 
-        finally:
-            execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000
-            self.cloudwatch_service.add_metric("TriggerTablesExecutionTime", execution_time, "Milliseconds")
-            self.logger.info(f"[{self.__class__.__name__}] Trigger concluído em {execution_time:.2f} ms")
-
     def _resolve_dependencies(self, table: Tables, current_partitions: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Resolve as dependências da tabela fornecida.
@@ -118,7 +136,7 @@ class TaskService:
 
         return dependencies_partitions
 
-    def process(self, task_schedule: TaskSchedule, task_table: TaskTable, execution: TableExecution, dependencies_partitions: Dict[str, Any]):
+    def process(self, task_schedule: TaskSchedule, task_table: TaskTable, execution: TableExecution, dependencies_partitions: Dict[str, Any], params: Optional[dict] = None):
         """
         Processa a execução da tarefa da tabela.
 
@@ -135,7 +153,7 @@ class TaskService:
             self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Parâmetros da tarefa: {task_table.params}({type(task_table.params)})")
 
             payload = self._interpolate_payload(
-                task_table.params,
+                params if params else task_table.params,
                 table=task_table.table,
                 partitions=dependencies_partitions,
                 execution=execution,

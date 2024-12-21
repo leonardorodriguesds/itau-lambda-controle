@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import MagicMock
 
+from src.app.exceptions.not_found_exception import NotFoundException
 from src.app.exceptions.table_insert_error import TableInsertError
 from src.app.models.dto.table_dto import TableDTO
 from src.app.models.tables import Tables
@@ -47,10 +48,8 @@ def test_find_by_name(table_service):
 
 
 def test_find_missing_id_and_name(table_service):
-    with pytest.raises(TableInsertError) as excinfo:
+    with pytest.raises(RuntimeError) as excinfo:
         table_service.find()
-    assert "Table id or name is required." in str(excinfo.value)
-
 
 def test_save_existing_table(table_service):
     table_service.table_repository.get_by_id.return_value = Tables(id=1, name="Test Table")

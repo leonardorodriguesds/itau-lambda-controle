@@ -8,6 +8,7 @@ from datetime import datetime
 
 from src.app.models.base import Base 
 from src.app.repositories.generic_repository import GenericRepository
+from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 
 class User(Base):
     __tablename__ = 'users'
@@ -228,15 +229,12 @@ def test_save_exception(user_repository, db_session, mock_logger):
     assert "Error saving object" in error_call_args
 
 def test_get_by_id_exception(user_repository, db_session, mock_logger, mocker):
-    mocker.patch.object(db_session, 'query', side_effect=Exception("Query error"))
+    mocker.patch.object(db_session, 'query', side_effect=NotFoundError("Query error"))
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(NotFoundError):
         user_repository.get_by_id(1)
 
-    assert str(exc_info.value) == "Query error"
-
 def test_complex_query(post_repository, db_session, mock_logger):
-    # Criar usuários
     user1 = User(name="User1", email="user1@example.com")
     user2 = User(name="User2", email="user2@example.com")
     user3 = User(name="User3", email="user3@example.com", date_deleted=datetime.now())  

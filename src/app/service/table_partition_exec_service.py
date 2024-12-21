@@ -43,8 +43,24 @@ class TablePartitionExecService:
                 p.partition.name: p.value
                 for p in self.get_by_execution(last_execution.id)
             }
-
+            
+            ready_tables = []
+            
             for table in tables:
+                dependencies = [ t.dependency_table for t in table.dependencies if t.is_required ]
+                ready = True
+                for dep in dependencies:
+                    last_execution = self.table_execution_service.get_latest_execution(dep.id)
+                    if not last_execution:
+                        self.logger.debug(f"[{self.__class__.__name__}] No execution found for dependency table [{dep.name}]")    
+                        ready = False
+                        break                    
+                    self.logger.debug(f"[{self.__class__.__name__}] Last execution ID for dependency table [{dep.name}]: [{last_execution.id}]")
+                    
+                if ready:
+                    ready_tables.append(table)
+
+            for table in ready_tables: 
                 execution: TableExecution = self.table_execution_service.get_latest_execution_with_restrictions(table.id, current_partitions)
 
                 table_last_execution = {}

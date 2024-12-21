@@ -2,6 +2,7 @@ import json
 from logging import Logger
 from typing import Optional
 from injector import inject
+from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 
 from src.app.models.dto.table_dto import TaskDTO
 from src.app.models.task_table import TaskTable
@@ -16,9 +17,18 @@ class TaskTableService:
         self.repository = repository
         self.task_executor_service = task_executor_service
         
-    def find(self, task_id: int) -> TaskTable:
-        self.logger.debug(f"[{self.__class__.__name__}] Finding task table: [{task_id}]")
-        return self.repository.get_by_id(task_id)
+    def find(self, task_id: Optional[int] = None, task_name: Optional[str] = None) -> TaskTable:
+        self.logger.debug(f"[{self.__class__.__name__}] Finding task table by id: {task_id} or name: {task_name}")
+        res = None
+        if task_id:
+            res = self.repository.get_by_id(task_id)
+        elif task_name:
+            res = self.repository.get_by_alias(task_name)
+        else:
+            raise Exception("Either task_id or task_name must be provided")
+        if not res:
+            raise NotFoundError(f"Task table with id {task_id} or name {task_name} not found")
+        return res
     
     def save(self, dto: TaskDTO, table_id: Optional[int] = None) -> TaskTable:
         self.logger.debug(f"[{self.__class__.__name__}] Saving task table: [{dto}]")

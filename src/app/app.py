@@ -2,6 +2,7 @@ from functools import wraps
 from logging import Logger
 import os
 import time
+import traceback
 from typing import Callable
 from inspect import signature
 
@@ -9,8 +10,10 @@ from alembic.config import Config
 from alembic import command
 
 from aws_lambda_powertools.event_handler import ApiGatewayResolver
+from aws_lambda_powertools.event_handler.exceptions import BadRequestError
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
+from src.app.models.dto.trigger_process_dto import TriggerProcess
 from src.app.service.cloud_watch_service import CloudWatchService
 from src.app.service.task_service import TaskService
 from injector import Injector
@@ -59,7 +62,8 @@ class LambdaHandler:
             response = self.app.resolve(event, context)
 
         except Exception as e:
-            response = {"message": "Error processing event", "error": str(e)}
+            stack_trace = traceback.format_exc()
+            response = {"message": "Error processing event", "error": str(e), "stacktrace": stack_trace, "statusCode": 500}
             error_count += 1
 
         finally:
@@ -170,7 +174,7 @@ class LambdaHandler:
             except Exception as e:
                 session_provider.rollback()
                 logger.exception(f"Error processing entities: {e}")
-                return {"message": f"Error: {str(e)}"}
+                raise
             finally:
                 session_provider.close()
 
@@ -270,16 +274,16 @@ class LambdaHandler:
             payload = self.app.current_event.json_body
 
             if not payload:
-                raise ValueError("Payload is required")
+                raise BadRequestError("Payload is required")
 
             if not payload.get("task_table"):
-                raise ValueError("Task table is required in payload")
+                raise BadRequestError("Task table is required in payload")
 
             if not payload.get("execution"):
-                raise ValueError("Execution is required in payload")
+                raise BadRequestError("Execution is required in payload")
 
             if not payload.get("task_schedule"):
-                raise ValueError("Task schedule is required in payload")
+                raise BadRequestError("Task schedule is required in payload")
 
             task_table_id = payload["task_table"]["id"]
             dependency_execution_id = payload["execution"]["id"]
@@ -296,3 +300,28 @@ class LambdaHandler:
 
             logger.info(f"Trigger processed successfully for task table ID: {task_table_id}")
             return {"message": "Trigger processed successfully."}
+
+        @self.app.post("/run")
+        @self.inject_dependencies
+        @self.transactional
+        def trigger_process(
+            task_service: TaskService, 
+            logger: Logger, 
+            session_provider: SessionProvider
+        ):
+            body = self.app.current_event.json_body
+            payload = TriggerProcess(**body)
+
+            if not payload:
+                raise BadRequestError("Payload is required")
+
+            if not payload.table_id and not payload.table_name:
+                raise BadRequestError("Table ID or name is required in payload")
+
+            if not payload.task_id and not payload.task_name:
+                raise BadRequestError("Task ID or name is required in payload")
+
+            task_service.run(payload)
+
+            logger.info(f"Event processed successfully.")
+            return {"message": "Task processed successfully."}

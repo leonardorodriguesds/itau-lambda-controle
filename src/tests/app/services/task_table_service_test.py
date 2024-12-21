@@ -28,11 +28,8 @@ def test_find_existing_task(task_table_service):
 def test_find_non_existing_task(task_table_service):
     task_table_service.repository.get_by_id.return_value = None
 
-    result = task_table_service.find(task_id=1)
-
-    task_table_service.logger.debug.assert_called()
-    task_table_service.repository.get_by_id.assert_called_once_with(1)
-    assert result is None
+    with pytest.raises(Exception) as exc_info:
+        result = task_table_service.find(task_id=1)        
 
 def test_save_new_task(task_table_service):
     mock_dto = TaskDTO(

@@ -3,6 +3,7 @@ from logging import Logger
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import and_
 from typing import Type, TypeVar, Generic, List, Optional
+from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 
 T = TypeVar('T')
 
@@ -57,7 +58,7 @@ class GenericRepository(Generic[T]):
             ).first()
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Error fetching object by ID [{obj_id}]: {e}")
-            raise
+            raise NotFoundError(f"Object with ID [{obj_id}] not found.")
 
     def get_all(self) -> List[T]:
         """
