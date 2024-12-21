@@ -154,7 +154,7 @@ class TaskService:
             }
 
             if task.method in method_map:
-                response = method_map[task.method](execution, payload, task)
+                response = method_map[task.method](task_table, execution, payload, task)
                 self.cloudwatch_service.add_metric(f"{task.method.capitalize()}Count", 1, "Count")
 
                 if response.get("ExecutionArn"):
@@ -196,7 +196,7 @@ class TaskService:
             raise
 
 
-    def stepfunction_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+    def stepfunction_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         """
         Chama uma Step Function enviando um payload JSON.
 
@@ -211,7 +211,7 @@ class TaskService:
 
             payload_with_metadata = {
                 "execution_id": execution.id,
-                "table_id": execution.table_id,
+                "table_id": task_table.table.id,
                 "source": execution.source,
                 "date_time": execution.date_time.isoformat(),
                 "payload": payload 
@@ -234,52 +234,80 @@ class TaskService:
             self.logger.error(f"Error invoking Step Function: {e}")
             raise
         
-    def sqs_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+    def sqs_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             sqs_client = self.boto_service.get_client('sqs')
+            payload_with_metadata = {
+                "execution_id": execution.id,
+                "table_id": task_table.table.id,
+                "source": execution.source,
+                "date_time": execution.date_time.isoformat(),
+                "payload": payload 
+            }
             response = sqs_client.send_message(
                 QueueUrl=task_executor.identification,
-                MessageBody=json.dumps(payload)
+                MessageBody=json.dumps(payload_with_metadata)
             )
             self.logger.info(f"SQS message sent successfully: {response['MessageId']}")
         except Exception as e:
             self.logger.error(f"Error sending SQS message: {e}")
             raise
         
-    def glue_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+    def glue_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             glue_client = self.boto_service.get_client('glue')
+            payload_with_metadata = {
+                "execution_id": execution.id,
+                "table_id": task_table.table.id,
+                "source": execution.source,
+                "date_time": execution.date_time.isoformat(),
+                "payload": payload 
+            }
             response = glue_client.start_job_run(
                 JobName=task_executor.identification,
-                Arguments=payload
+                Arguments=payload_with_metadata
             )
             self.logger.info(f"Glue job started successfully: {response['JobRunId']}")
         except Exception as e:
             self.logger.error(f"Error starting Glue job: {e}")
             raise
         
-    def lambda_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+    def lambda_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             lambda_client = self.boto_service.get_client('lambda')
+            payload_with_metadata = {
+                "execution_id": execution.id,
+                "table_id": task_table.table.id,
+                "source": execution.source,
+                "date_time": execution.date_time.isoformat(),
+                "payload": payload 
+            }
             response = lambda_client.invoke(
                 FunctionName=task_executor.identification,
                 InvocationType='Event',
-                Payload=json.dumps(payload)
+                Payload=json.dumps(payload_with_metadata)
             )
             self.logger.info(f"Lambda function invoked successfully: {response['StatusCode']}")
         except Exception as e:
             self.logger.error(f"Error invoking Lambda function: {e}")
             raise
 
-    def eventbridge_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+    def eventbridge_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             eventbridge_client = self.boto_service.get_client('events')
+            payload_with_metadata = {
+                "execution_id": execution.id,
+                "table_id": task_table.table.id,
+                "source": execution.source,
+                "date_time": execution.date_time.isoformat(),
+                "payload": payload 
+            }
             response = eventbridge_client.put_events(
                 Entries=[
                     {
                         'Source': task_executor.identification,
                         'DetailType': 'Table Process Event',
-                        'Detail': json.dumps(payload)
+                        'Detail': json.dumps(payload_with_metadata)
                     }
                 ]
             )
@@ -288,10 +316,18 @@ class TaskService:
             self.logger.error(f"Error sending EventBridge event: {e}")
             raise
 
-    def api_process(self, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
+    def api_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor):
         try:
             import requests
-            response = requests.post(task_executor.identification, json=payload)
+            
+            payload_with_metadata = {
+                "execution_id": execution.id,
+                "table_id": task_table.table.id,
+                "source": execution.source,
+                "date_time": execution.date_time.isoformat(),
+                "payload": payload 
+            }
+            response = requests.post(task_executor.identification, json=payload_with_metadata)
             response.raise_for_status()
             self.logger.info(f"API called successfully: {response.status_code}")
         except Exception as e:

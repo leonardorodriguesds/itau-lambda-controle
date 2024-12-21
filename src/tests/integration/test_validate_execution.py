@@ -1,4 +1,5 @@
 import json
+from unittest.mock import ANY
 import pytest
 from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
@@ -7,12 +8,18 @@ from sqlalchemy.orm import sessionmaker
 from src.app.models.base import Base  # Ajuste o import para onde estiver seu Base
 from lambda_function import lambda_handler
 from src.app.config.config import AppModule
+from src.app.models.table_execution import TableExecution
 from src.app.models.task_executor import TaskExecutor
 from src.app.provider.session_provider import SessionProvider
 from src.app.service.boto_service import BotoService
-from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService
+from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService, MockSchedulerClient, MockStepFunctionClient
 from src.tests.providers.mock_session_provider import TestSessionProvider
 
+@pytest.fixture
+def mock_boto_service():
+    mock_scheduler_client = MockSchedulerClient()
+    mock_step_function_client = MockStepFunctionClient()
+    return MockBotoService(mock_scheduler_client, mock_step_function_client)
 
 @pytest.fixture
 def db_session():
@@ -37,7 +44,7 @@ def db_session():
 
 
 @pytest.fixture
-def test_injector(db_session):
+def test_injector(db_session, mock_boto_service):
     """
     Fixture que devolve um Injector que usa a sessão 
     em memória no lugar do SessionProvider real.
@@ -45,7 +52,7 @@ def test_injector(db_session):
     class TestModule(AppModule):
         def configure(self, binder: Binder) -> None:
             super().configure(binder)            
-            binder.bind(BotoService, to=MockBotoService(), scope=singleton)
+            binder.bind(BotoService, to=mock_boto_service, scope=singleton)
             binder.bind(SessionProvider, to=TestSessionProvider(db_session))
 
     return Injector([TestModule()])
@@ -688,3 +695,350 @@ def test_add_table_and_register_executions(test_injector):
     all_schedules = session.query(TaskSchedule).all()
     
     assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
+
+def test_add_table_and_register_executions_and_trigger_process(test_injector, mock_boto_service):
+    event = {
+        "httpMethod": "POST",
+        "path": "/add_table",
+        "body": json.dumps({
+            "data": [
+                {
+                    "name": "tbjf001_op_pdz_prep",
+                    "description": "Tabela de operações preparadas do PDZ",
+                    "requires_approval": False,
+                    "partitions": [
+                        {
+                            "name": "ano_mes_referencia",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        },
+                        {
+                            "name": "versao_processamento",
+                            "type": "int",
+                            "is_required": True
+                        },
+                        {
+                            "name": "identificador_empresa",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        }
+                    ],
+                    "dependencies": [],
+                    "tasks": []
+                },
+                {
+                    "name": "tbjf002_op_plz_prep",
+                    "description": "Tabela de operações preparadas do PLZ",
+                    "requires_approval": False,
+                    "partitions": [
+                        {
+                            "name": "ano_mes_referencia",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        },
+                        {
+                            "name": "versao_processamento",
+                            "type": "int",
+                            "is_required": True
+                        },
+                        {
+                            "name": "identificador_empresa",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        }
+                    ],
+                    "dependencies": [],
+                    "tasks": []
+                },
+                {
+                    "name": "tb_modalidade_prep",
+                    "description": "Tabela de modalidades",
+                    "requires_approval": False,
+                    "partitions": [
+                        {
+                            "name": "ano_mes_referencia",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        },
+                        {
+                            "name": "versao_processamento",
+                            "type": "int",
+                            "is_required": True
+                        }
+                    ],
+                    "dependencies": [],
+                    "tasks": []
+                },
+                {
+                    "name": "tb_op_enriquecido",
+                    "description": "Tabela de operações preparadas do PLZ",
+                    "requires_approval": True,
+                    "partitions": [
+                        {
+                            "name": "ano_mes_referencia",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        },
+                        {
+                            "name": "versao_processamento",
+                            "type": "int",
+                            "is_required": True
+                        },
+                        {
+                            "name": "identificador_empresa",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        }
+                    ],
+                    "dependencies": [
+                        {
+                            "dependency_name": "tbjf001_op_pdz_prep",
+                            "is_required": True
+                        },
+                        {
+                            "dependency_name": "tbjf002_op_plz_prep",
+                            "is_required": True
+                        },
+                        {
+                            "dependency_name": "tb_modalidade_prep",
+                            "is_required": False
+                        }
+                    ],
+                    "tasks": [
+                        {
+                            "task_executor": "step_function_executor",
+                            "alias": "op_enriquecido_step_function_executor",
+                            "params": {
+                                "table_name": "{{table.name}}",
+                                "table_description": "{{table.description}}"
+                            },
+                            "debounce_seconds": 30
+                        }
+                    ]
+                }
+            ],
+            "user": "lrcxpnu"
+        })
+    }
+
+    session_provider = test_injector.get(SessionProvider)
+    session = session_provider.get_session()
+
+    from src.app.models.task_executor import TaskExecutor
+    task_execution = TaskExecutor(alias="step_function_executor", method="stepfunction_process", identification="arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine")
+    session.add(task_execution)
+
+    response = lambda_handler(
+        event=event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+
+    assert response["statusCode"] == 200
+
+    from src.app.models.tables import Tables
+    from src.app.models.partitions import Partitions
+    from src.app.models.dependencies import Dependencies
+    from src.app.models.task_table import TaskTable
+
+    all_tables = session.query(Tables).all()
+    assert len(all_tables) == 4, f"Esperava 4 tabelas, mas encontrou {len(all_tables)}"
+
+    tb1 = session.query(Tables).filter_by(name="tbjf001_op_pdz_prep").first()
+    assert tb1 is not None
+    assert tb1.description == "Tabela de operações preparadas do PDZ"
+    assert tb1.requires_approval is False
+    partitions_tb1 = session.query(Partitions).filter_by(table_id=tb1.id).all()
+    assert len(partitions_tb1) == 3
+
+    tb4 = session.query(Tables).filter_by(name="tb_op_enriquecido").first()
+    assert tb4 is not None
+    assert tb4.requires_approval is True
+    partitions_tb4 = session.query(Partitions).filter_by(table_id=tb4.id).all()
+    assert len(partitions_tb4) == 3
+
+    table_deps = session.query(Dependencies).filter_by(table_id=tb4.id).all()
+    assert len(table_deps) == 3
+
+    expected_deps = {
+        "tbjf001_op_pdz_prep": True,
+        "tbjf002_op_plz_prep": True,
+        "tb_modalidade_prep": False
+    }
+    for dep in table_deps:
+        assert dep.dependency_table.name in expected_deps, f"Dependency {dep.dependency_table.name} não esperada"
+        assert dep.is_required == expected_deps[dep.dependency_table.name]
+
+    saved_task = session.query(TaskTable).filter_by(alias='op_enriquecido_step_function_executor').first()
+    assert saved_task is not None
+    assert saved_task.task_executor.alias == "step_function_executor"
+    assert saved_task.debounce_seconds == 30
+
+    register_event = {
+        "httpMethod": "POST",
+        "path": "/register_execution",
+        "body": json.dumps({
+            "data": [
+                {
+                    "table_name": "tbjf001_op_pdz_prep",
+                    "partitions": [
+                        {"partition_name": "ano_mes_referencia", "value": "2405"},
+                        {"partition_name": "versao_processamento", "value": "1"},
+                        {"partition_name": "identificador_empresa", "value": "0"}
+                    ],
+                    "source": "glue"
+                },
+                {
+                    "table_name": "tbjf001_op_pdz_prep",
+                    "partitions": [
+                        {"partition_name": "ano_mes_referencia", "value": "2405"},
+                        {"partition_name": "versao_processamento", "value": "2"},
+                        {"partition_name": "identificador_empresa", "value": "0"}
+                    ],
+                    "source": "glue"
+                },
+                {
+                    "table_name": "tbjf002_op_plz_prep",
+                    "partitions": [
+                        {"partition_name": "ano_mes_referencia", "value": "2405"},
+                        {"partition_name": "versao_processamento", "value": "1"},
+                        {"partition_name": "identificador_empresa", "value": "0"}
+                    ],
+                    "source": "glue"
+                },
+                {
+                    "table_name": "tb_modalidade_prep",
+                    "partitions": [
+                        {"partition_name": "ano_mes_referencia", "value": "2405"},
+                        {"partition_name": "versao_processamento", "value": "1"}
+                    ],
+                    "source": "glue"
+                }
+            ],
+            "user": "lrcxpnu"
+        })
+    }
+
+    mock_scheduler_client = mock_boto_service.get_client('scheduler')
+
+    register_response = lambda_handler(
+        event=register_event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+
+    assert register_response["statusCode"] == 200
+
+    from src.app.models.table_partition_exec import TablePartitionExec
+    all_execs = session.query(TablePartitionExec).all()
+    assert len(all_execs) == (1 * 3) + (1 * 3) + (1 * 3) + (1 * 2), f"Esperava {(1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)} execuções, mas encontrou {len(all_execs)}"
+
+    from src.app.models.task_schedule import TaskSchedule
+    all_schedules = session.query(TaskSchedule).all()
+    task_schedule = all_schedules[0]
+    assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
+    assert len(mock_scheduler_client._schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(mock_scheduler_client._schedules)}"
+
+    register_response = lambda_handler(
+        event=register_event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+
+    assert register_response["statusCode"] == 200
+
+    all_execs = session.query(TablePartitionExec).all()
+    assert len(all_execs) == ((1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)) * 2, f"Esperava {((1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)) * 2} execuções, mas encontrou {len(all_execs)}"
+
+    all_schedules = session.query(TaskSchedule).all()
+    assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
+
+    table_execution = (
+        session.query(TableExecution)
+        .order_by(TableExecution.id.desc())
+        .first()
+    )
+    
+    execution_id = table_execution.id
+    execution_source = table_execution.source
+    saved_task_id = saved_task.id
+    saved_task_alias = saved_task.alias
+    schedule_id = task_schedule.id
+    schedule_alias = task_schedule.schedule_alias
+    schedule_unique_alias = task_schedule.unique_alias
+    db_seconds = saved_task.debounce_seconds
+    
+    body_content = {
+        "execution": {
+            "id": execution_id,
+            "source": execution_source,
+            "timestamp": ANY
+        },
+        "task_table": {
+            "id": saved_task_id,
+            "alias": saved_task_alias
+        },
+        "task_schedule": {
+            "id": schedule_id,
+            "schedule_alias": schedule_alias,
+            "unique_alias": schedule_unique_alias
+        },
+        "partitions": {}
+    }
+
+    expected_trigger_event = {
+        "httpMethod": "POST",
+        "path": "/trigger",
+        "body": body_content,
+        "metadata": {
+            "unique_alias": schedule_unique_alias,
+            "debounce_seconds": db_seconds
+        }
+    }
+
+
+    _, first_value = next(iter(mock_scheduler_client._schedules.items()))
+    trigger_event = json.loads(first_value["Target"]["Input"])
+
+    assert trigger_event == expected_trigger_event   
+    
+    trigger_event["body"] = json.dumps(trigger_event["body"])
+    
+    trigger_response = lambda_handler(
+        event=trigger_event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+    
+    assert trigger_response["statusCode"] == 200
+    
+    mock_step_function_client = mock_boto_service.get_client('stepfunctions')
+    _, first_value = next(iter(mock_step_function_client._executions.items()))
+    
+    table_tb_op_enriquecido = session.query(Tables).filter_by(name="tb_op_enriquecido").first()
+    
+    exptected_input = {
+        "execution_id": execution_id,
+        "table_id": table_tb_op_enriquecido.id,
+        "source": execution_source,
+        "date_time": ANY,
+        "payload": {
+            "table_name": "tb_op_enriquecido",
+            "table_description": ANY,
+            'unique_alias': schedule_unique_alias
+        }
+    }
+    
+    assert first_value["stateMachineArn"] == task_execution.identification
+    assert json.loads(first_value["input"]) == exptected_input

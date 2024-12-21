@@ -4,6 +4,25 @@ class MockBotoExceptions:
     """Simula o namespace de exceções retornadas por boto3."""
     class ResourceNotFoundException(Exception):
         pass
+    
+class MockStepFunctionClient:
+    """Mock do client 'stepfunctions' do boto3, armazenando execuções em memória."""
+    
+    def __init__(self):
+        self._executions = {}  # dict { execution_arn: { "status": ..., "input": ... } }
+        self.exceptions = MockBotoExceptions
+    
+    def start_execution(self, stateMachineArn, name, input):
+        """
+        Inicia uma execução em memória.
+        """
+        print(f"Starting execution: {name}")
+        self._executions[name] = {
+            "status": "RUNNING",
+            "input": input,
+            "stateMachineArn": stateMachineArn
+        }
+        return {"executionArn": f"arn:aws:states:::execution/{stateMachineArn}"}
 
 class MockSchedulerClient:
     """Mock do client 'scheduler' do boto3, armazenando schedules em memória."""
@@ -68,10 +87,13 @@ class MockBotoService(BotoService):
     retornando um MockSchedulerClient ao invés de um client real.
     """
 
-    def __init__(self):
-        self.scheduler = MockSchedulerClient()
+    def __init__(self, mock_scheduler_client=None, step_function_client=None):
+        self.scheduler = mock_scheduler_client if mock_scheduler_client else MockSchedulerClient()
+        self.stepfunctions = step_function_client if step_function_client else MockStepFunctionClient()
 
     def get_client(self, service_name: str):
         if service_name == 'scheduler':
             return self.scheduler
+        elif service_name == 'stepfunctions':
+            return self.stepfunctions
         raise ValueError(f"MockBotoService não suporta o serviço: {service_name}")
