@@ -133,29 +133,7 @@ def test_check_event_exists_resource_not_found_exception(service):
     assert result is False
     service.scheduler_client.list_schedules.assert_called_once_with(NamePrefix=schedule_alias)
     
-def test_register_or_postergate_event(service):
-    task_table = MagicMock(spec=TaskTable)
-    task_table.id = 1
-    task_table.alias = "example_alias"
-    task_table.debounce_seconds = 60
-    task_table.task_executor = MagicMock(spec=TaskExecutor)
-
-    trigger_execution = MagicMock(spec=TableExecution)
-    trigger_execution.id = 101
-
-    last_execution = MagicMock(spec=TableExecution)
-    last_execution.id = 100
-
-    partitions = {"partition1": "value1"}
-
-    service.task_schedule_service.get_by_unique_alias_and_pendent.return_value = None
-
-    service.register_or_postergate_event(task_table, trigger_execution, last_execution, partitions)
-
-    service.task_schedule_service.get_by_unique_alias_and_pendent.assert_called_once()
-    service.scheduler_client.create_schedule.assert_called_once()
-
-def test_register_event(service):
+def test_register_or_postergate_event(service, mock_services):
     task_table = MagicMock(spec=TaskTable)
     task_table.id = 1
     task_table.alias = "example_alias"
@@ -166,37 +144,93 @@ def test_register_event(service):
 
     trigger_execution = MagicMock(spec=TableExecution)
     trigger_execution.id = 101
+    trigger_execution.source = "source_example"
+    trigger_execution.date_time = datetime(2024, 12, 18, 15, 30)
 
     last_execution = MagicMock(spec=TableExecution)
     last_execution.id = 100
 
     partitions = {"partition1": "value1"}
+    
+    unique_alias = "unique_alias"
+    
+    mock_task_schedule_service = mock_services["task_schedule_service"]
+    task_schedule_mock = MagicMock(spec=TaskSchedule)
+    task_schedule_mock.id = 1
+    task_schedule_mock.unique_alias = unique_alias
+    task_schedule_mock.schedule_alias = "schedule_alias"
+    mock_task_schedule_service.save.return_value = task_schedule_mock
 
-    service.register_event(task_table, trigger_execution, last_execution, partitions)
+    service.task_schedule_service.get_by_unique_alias_and_pendent.return_value = None
+
+    service.register_or_postergate_event(task_table, trigger_execution, last_execution, partitions)
+
+    service.task_schedule_service.get_by_unique_alias_and_pendent.assert_called_once()
+    service.scheduler_client.create_schedule.assert_called_once()
+
+def test_register_event(service, mock_services):
+    task_table = MagicMock(spec=TaskTable)
+    task_table.id = 1
+    task_table.alias = "example_alias"
+    task_table.debounce_seconds = 60
+    task_table.task_executor = MagicMock(spec=TaskExecutor)
+    task_table.task_executor.identification = "arn:aws:lambda:region:account:function"
+    task_table.task_executor.target_role_arn = "arn:aws:iam::account:role/service-role"
+
+    trigger_execution = MagicMock(spec=TableExecution)
+    trigger_execution.id = 101
+    trigger_execution.source = "source_example"
+    trigger_execution.date_time = datetime(2024, 12, 18, 15, 30)
+
+    last_execution = MagicMock(spec=TableExecution)
+    last_execution.id = 100
+
+    partitions = {"partition1": "value1"}
+    
+    unique_alias = "unique_alias"
+    
+    mock_task_schedule_service = mock_services["task_schedule_service"]
+    task_schedule_mock = MagicMock(spec=TaskSchedule)
+    task_schedule_mock.id = 1
+    task_schedule_mock.unique_alias = unique_alias
+    task_schedule_mock.schedule_alias = "schedule_alias"
+    mock_task_schedule_service.save.return_value = task_schedule_mock
+
+    service.register_event(None, unique_alias, task_table, trigger_execution, partitions)
 
     service.scheduler_client.create_schedule.assert_called_once()
 
-def test_postergate_event(service):
+def test_postergate_event(service, mock_services):
     task_schedule = MagicMock(spec=TaskSchedule)
     task_schedule.id = 1
     task_schedule.unique_alias = "unique_alias"
-    task_schedule.task_table = MagicMock(spec=TaskTable)
+    task_schedule.schedule_alias = "schedule_alias"
+    task_table_mock = MagicMock(spec=TaskTable)
+    task_table_mock.debounce_seconds = 60
+    task_table_mock.id = 1
+    task_table_mock.alias = "example_alias"
+    task_schedule.task_table = task_table_mock
     task_schedule.task_table.task_executor = MagicMock(spec=TaskExecutor)
     task_schedule.task_table.task_executor.identification = "arn:aws:lambda:region:account:function"
     task_schedule.task_table.task_executor.target_role_arn = "arn:aws:iam::account:role/service-role"
 
     trigger_execution = MagicMock(spec=TableExecution)
     trigger_execution.id = 101
+    trigger_execution.source = "source_example"
+    trigger_execution.date_time = datetime(2024, 12, 18, 15, 30)
+    
+    mock_task_schedule_service = mock_services["task_schedule_service"]
+    mock_task_schedule_service.save.return_value = task_schedule
 
-    service.postergate_event(task_schedule, trigger_execution)
+    service.postergate_event(task_schedule.unique_alias, task_schedule, trigger_execution, partitions={})
 
     service.scheduler_client.update_schedule.assert_called_once()
 
 def test_delete_event(service):
     task_schedule = MagicMock(spec=TaskSchedule)
     task_schedule.id = 1
-    task_schedule.unique_alias = "unique_alias"
+    task_schedule.schedule_alias = "schedule_alias"
 
     service.delete_event(task_schedule)
 
-    service.scheduler_client.delete_schedule.assert_called_once_with(Name="unique_alias")
+    service.scheduler_client.delete_schedule.assert_called_once_with(Name="schedule_alias")

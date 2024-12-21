@@ -6,9 +6,9 @@ class TaskTable(AbstractBase):
     __tablename__ = 'task_table'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    table_id = Column(Integer, ForeignKey('tables.id'), primary_key=True)
-    task_executor_id = Column(Integer, ForeignKey('task_executor.id'), primary_key=True)
-    alias = Column(String(255), primary_key=True)
+    table_id = Column(Integer, ForeignKey('tables.id'))
+    task_executor_id = Column(Integer, ForeignKey('task_executor.id'))
+    alias = Column(String(255))
     params = Column(JSON)
     debounce_seconds = Column(Integer, nullable=False, default=10)
     

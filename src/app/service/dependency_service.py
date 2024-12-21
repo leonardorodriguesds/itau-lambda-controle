@@ -23,7 +23,8 @@ class DependencyService:
             if dependency_data.dependency_id and dependency_data.dependency_id not in existing_dependencies:
                 dependency = Dependencies(
                     table_id=table_id,
-                    dependency_id=dependency_data.dependency_id
+                    dependency_id=dependency_data.dependency_id,
+                    is_required=dependency_data.is_required
                 )
                 self.dependency_repository.save(dependency)
             elif not dependency_data.dependency_id and dependency_data.dependency_name:
@@ -32,6 +33,7 @@ class DependencyService:
                     raise TableInsertError(f"Dependency table '{dependency_data.dependency_name}' not found.")
                 dependency = Dependencies(
                     table_id=table_id,
-                    dependency_id=dependency_table.id
+                    dependency_id=dependency_table.id,
+                    is_required=dependency_data.is_required
                 )
                 self.dependency_repository.save(dependency)

@@ -93,6 +93,7 @@ class LambdaHandler:
                 for param_name, param in func_signature.parameters.items()
                 if param.annotation is not param.empty
             }
+            self.logger.debug(f"[{self.__class__.__name__}] Dependencies injected for {func.__name__}: {dependencies}")
             return func(*args, **dependencies, **kwargs)
         return wrapper
 
