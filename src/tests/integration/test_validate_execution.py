@@ -5,7 +5,8 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.app.config.constants import STATIC_SCHEDULE_COMPLETED
+from src.app.config.constants import STATIC_APPROVE_STATUS_APPROVED, STATIC_APPROVE_STATUS_PENDING, STATIC_SCHEDULE_COMPLETED
+from src.app.models.approval_status import ApprovalStatus
 from src.app.models.base import Base  
 from lambda_function import lambda_handler
 from src.app.config.config import AppModule
@@ -714,21 +715,28 @@ def test_add_table_and_register_executions(test_injector):
     assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
 
 @pytest.mark.parametrize(
-    "executor_method, identification",
+    "executor_method, identification, requires_approval",
     [
-        ("stepfunction_process", "arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine"),
-        ("sqs_process", "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue"),
-        ("glue_process", "my-glue-job-name"),
-        ("lambda_process", "arn:aws:lambda:us-east-1:123456789012:function:my-lambda"),
-        ("eventbridge_process", "my.event.source"),
-        ("api_process", "https://fake.api/my-endpoint"),
+        ("stepfunction_process", "arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine", True),
+        ("sqs_process", "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue", True),
+        ("glue_process", "my-glue-job-name", True),
+        ("lambda_process", "arn:aws:lambda:us-east-1:123456789012:function:my-lambda", True),
+        ("eventbridge_process", "my.event.source", True),
+        ("api_process", "https://fake.api/my-endpoint", True),
+        ("stepfunction_process", "arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine", False),
+        ("sqs_process", "https://sqs.us-east-1.amazonaws.com/123456789012/my-queue", False),
+        ("glue_process", "my-glue-job-name", False),
+        ("lambda_process", "arn:aws:lambda:us-east-1:123456789012:function:my-lambda", False),
+        ("eventbridge_process", "my.event.source", False),
+        ("api_process", "https://fake.api/my-endpoint", False),
     ],
 )
 def test_add_table_and_register_executions_and_trigger_process(
     test_injector, 
     mock_boto_service,
     executor_method,
-    identification
+    identification,
+    requires_approval
 ):
     event = {
         "httpMethod": "POST",
@@ -810,7 +818,7 @@ def test_add_table_and_register_executions_and_trigger_process(
                 {
                     "name": "tb_op_enriquecido",
                     "description": "Tabela de operações preparadas do PLZ",
-                    "requires_approval": True,
+                    "requires_approval": requires_approval,
                     "partitions": [
                         {
                             "name": "ano_mes_referencia",
@@ -896,7 +904,7 @@ def test_add_table_and_register_executions_and_trigger_process(
 
     tb4 = session.query(Tables).filter_by(name="tb_op_enriquecido").first()
     assert tb4 is not None
-    assert tb4.requires_approval is True
+    assert tb4.requires_approval is requires_approval
     partitions_tb4 = session.query(Partitions).filter_by(table_id=tb4.id).all()
     assert len(partitions_tb4) == 3
 
@@ -977,12 +985,7 @@ def test_add_table_and_register_executions_and_trigger_process(
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == (1 * 3) + (1 * 3) + (1 * 3) + (1 * 2), f"Esperava {(1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)} execuções, mas encontrou {len(all_execs)}"
 
-    from src.app.models.task_schedule import TaskSchedule
-    all_schedules = session.query(TaskSchedule).all()
-    task_schedule = all_schedules[0]
-    assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
-    assert len(mock_scheduler_client._schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(mock_scheduler_client._schedules)}"
-
+    # chama novamente para validar que só cria 1 schedule
     register_response = lambda_handler(
         event=register_event,
         context=None,
@@ -994,9 +997,39 @@ def test_add_table_and_register_executions_and_trigger_process(
 
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == ((1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)) * 2, f"Esperava {((1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)) * 2} execuções, mas encontrou {len(all_execs)}"
+    
+    if requires_approval:
+        approval_status = session.query(ApprovalStatus).filter_by(status=STATIC_APPROVE_STATUS_PENDING).first()
+        
+        assert approval_status is not None, "Status de aprovação não encontrado"
+        
+        approval_event = {
+            "httpMethod": "POST",
+            "path": "/approve",
+            "body": json.dumps({
+                "approval_status_id": approval_status.id,
+                "user": "lrcxpnu"
+            })
+        }
+        
+        register_response = lambda_handler(
+            event=approval_event,
+            context=None,
+            injected_injector=test_injector,
+            debug=True
+        )
 
+        assert register_response["statusCode"] == 200
+        
+        approval_status_approved = session.query(ApprovalStatus).filter_by(status=STATIC_APPROVE_STATUS_APPROVED).first()
+        assert approval_status_approved is not None
+        assert approval_status_approved.id == approval_status.id
+        
+    from src.app.models.task_schedule import TaskSchedule
     all_schedules = session.query(TaskSchedule).all()
+    task_schedule = all_schedules[0]
     assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
+    assert len(mock_scheduler_client._schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(mock_scheduler_client._schedules)}"
 
     table_execution = (
         session.query(TableExecution)
@@ -1039,7 +1072,6 @@ def test_add_table_and_register_executions_and_trigger_process(
             "debounce_seconds": db_seconds
         }
     }
-
 
     _, first_value = next(iter(mock_scheduler_client._schedules.items()))
     trigger_event = json.loads(first_value["Target"]["Input"])

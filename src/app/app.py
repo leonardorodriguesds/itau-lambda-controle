@@ -15,7 +15,9 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 
 from src.app.models.dto.task_executor_dto import TaskExecutorDTO
 from src.app.models.dto.trigger_process_dto import TriggerProcess
+from src.app.service.approval_status_service import ApprovalStatusService
 from src.app.service.cloud_watch_service import CloudWatchService
+from src.app.service.event_bridge_scheduler_service import EventBridgeSchedulerService
 from src.app.service.task_executor_service import TaskExecutorService
 from src.app.service.task_service import TaskService
 from injector import Injector
@@ -210,6 +212,49 @@ class LambdaHandler:
             return {
                 "message": "Migrations ran successfully."
             }
+        
+        @self.app.post("/approve")
+        @self.inject_dependencies
+        @self.transactional
+        def approve_task(
+            approval_status_service: ApprovalStatusService,
+            event_bridge_schedule_service: EventBridgeSchedulerService,
+            session_provider: SessionProvider, 
+            logger: Logger
+        ):
+            body = self.app.current_event.json_body
+            aproval_status_id = body.get("approval_status_id")
+            user = body.get("user")
+
+            if not aproval_status_id:
+                raise BadRequestError("aproval_status_id is required")
+
+            approval_status = approval_status_service.approve(aproval_status_id, user)
+            
+            event_bridge_schedule_service.schedule(approval_status.task_schedule)
+            
+            logger.info(f"Event processed successfully.")
+            return {"message": "Task approved successfully."}
+        
+        @self.app.post("/reject")
+        @self.inject_dependencies
+        @self.transactional
+        def reject_task(
+            approval_status_service: ApprovalStatusService,
+            session_provider: SessionProvider, 
+            logger: Logger
+        ):
+            body = self.app.current_event.json_body
+            aproval_status_id = body.get("approval_status_id")
+            user = body.get("user")
+
+            if not aproval_status_id:
+                raise BadRequestError("aproval_status_id is required")
+
+            approval_status_service.reject(aproval_status_id, user)
+            
+            logger.info(f"Event processed successfully.")
+            return {"message": "Task approved successfully."}
 
         @self.app.get("/health")
         @self.inject_dependencies

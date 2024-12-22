@@ -549,7 +549,7 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
                 {
                     "name": "tb_op_enriquecido",
                     "description": "Tabela de operações preparadas do PLZ",
-                    "requires_approval": True,
+                    "requires_approval": False,
                     "partitions": [
                         {
                             "name": "ano_mes_referencia",

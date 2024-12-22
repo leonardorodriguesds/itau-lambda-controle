@@ -3,10 +3,12 @@ import pytest
 from botocore.exceptions import ClientError
 from unittest.mock import MagicMock, PropertyMock
 from src.app.models.table_execution import TableExecution
+from src.app.models.tables import Tables
 from src.app.models.task_executor import TaskExecutor
 from src.app.models.task_schedule import TaskSchedule
 from src.app.models.task_table import TaskTable
 from src.app.service.event_bridge_scheduler_service import EventBridgeSchedulerService
+import json
 
 @pytest.fixture
 def mock_services():
@@ -14,7 +16,8 @@ def mock_services():
     return {
         "logger": MagicMock(),
         "boto_service": MagicMock(),
-        "task_schedule_service": MagicMock()
+        "task_schedule_service": MagicMock(),
+        "approval_status_service": MagicMock(),
     }
 
 @pytest.fixture
@@ -22,6 +25,7 @@ def service(mock_services):
     """Create an instance of EventBridgeSchedulerService with mocked dependencies."""
     service = EventBridgeSchedulerService(**mock_services)
     service.scheduler_client = MagicMock()
+    service.approval_status_service = MagicMock()
 
     type(service.scheduler_client).exceptions = PropertyMock(
         return_value=MagicMock(Exception=ClientError)
@@ -141,6 +145,13 @@ def test_register_or_postergate_event(service, mock_services):
     task_table.task_executor = MagicMock(spec=TaskExecutor)
     task_table.task_executor.identification = "arn:aws:lambda:region:account:function"
     task_table.task_executor.target_role_arn = "arn:aws:iam::account:role/service-role"
+    
+    table = MagicMock(spec=Tables)
+    table.id = 1
+    table.name = "example_table"
+    table.requires_approval = False
+    
+    task_table.table = table    
 
     trigger_execution = MagicMock(spec=TableExecution)
     trigger_execution.id = 101
@@ -155,10 +166,14 @@ def test_register_or_postergate_event(service, mock_services):
     unique_alias = "unique_alias"
     
     mock_task_schedule_service = mock_services["task_schedule_service"]
+    mock_task_schedule_service = mock_services["task_schedule_service"]
     task_schedule_mock = MagicMock(spec=TaskSchedule)
     task_schedule_mock.id = 1
     task_schedule_mock.unique_alias = unique_alias
     task_schedule_mock.schedule_alias = "schedule_alias"
+    task_schedule_mock.task_table = task_table
+    task_schedule_mock.partitions = json.dumps(partitions)
+    task_schedule_mock.table_execution = trigger_execution
     mock_task_schedule_service.save.return_value = task_schedule_mock
 
     service.task_schedule_service.get_by_unique_alias_and_pendent.return_value = None
@@ -177,6 +192,13 @@ def test_register_event(service, mock_services):
     task_table.task_executor.identification = "arn:aws:lambda:region:account:function"
     task_table.task_executor.target_role_arn = "arn:aws:iam::account:role/service-role"
 
+    table = MagicMock(spec=Tables)
+    table.id = 1
+    table.name = "example_table"
+    table.requires_approval = False
+    
+    task_table.table = table
+
     trigger_execution = MagicMock(spec=TableExecution)
     trigger_execution.id = 101
     trigger_execution.source = "source_example"
@@ -194,6 +216,9 @@ def test_register_event(service, mock_services):
     task_schedule_mock.id = 1
     task_schedule_mock.unique_alias = unique_alias
     task_schedule_mock.schedule_alias = "schedule_alias"
+    task_schedule_mock.task_table = task_table
+    task_schedule_mock.partitions = json.dumps(partitions)
+    task_schedule_mock.table_execution = trigger_execution
     mock_task_schedule_service.save.return_value = task_schedule_mock
 
     service.register_event(None, unique_alias, task_table, trigger_execution, partitions)
@@ -205,10 +230,19 @@ def test_postergate_event(service, mock_services):
     task_schedule.id = 1
     task_schedule.unique_alias = "unique_alias"
     task_schedule.schedule_alias = "schedule_alias"
+    
     task_table_mock = MagicMock(spec=TaskTable)
     task_table_mock.debounce_seconds = 60
     task_table_mock.id = 1
     task_table_mock.alias = "example_alias"
+    
+    table = MagicMock(spec=Tables)
+    table.id = 1
+    table.name = "example_table"
+    table.requires_approval = False
+    
+    task_table_mock.table = table
+    
     task_schedule.task_table = task_table_mock
     task_schedule.task_table.task_executor = MagicMock(spec=TaskExecutor)
     task_schedule.task_table.task_executor.identification = "arn:aws:lambda:region:account:function"
@@ -221,6 +255,12 @@ def test_postergate_event(service, mock_services):
     
     mock_task_schedule_service = mock_services["task_schedule_service"]
     mock_task_schedule_service.save.return_value = task_schedule
+
+    partitions = {"partition1": "value1"}
+    
+    task_schedule.task_table = task_table_mock
+    task_schedule.partitions = json.dumps(partitions)
+    task_schedule.table_execution = trigger_execution
 
     service.postergate_event(task_schedule.unique_alias, task_schedule, trigger_execution, partitions={})
 

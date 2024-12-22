@@ -5,7 +5,9 @@ from logging import Logger
 from typing import Any, Dict
 from injector import inject
 
-from src.app.config.constants import STATIC_SCHEDULE_COMPLETED, STATIC_SCHEDULE_FAILED
+from src.app.config.constants import STATIC_APPROVE_STATUS_PENDING, STATIC_SCHEDULE_COMPLETED, STATIC_SCHEDULE_FAILED, STATIC_SCHEDULE_PENDENT, STATIC_SCHEDULE_WAITING_APPROVAL
+from src.app.models.tables import Tables
+from src.app.service.approval_status_service import ApprovalStatusService
 from src.app.service.task_schedule_service import TaskScheduleService
 from src.app.service.boto_service import BotoService
 from src.app.models.table_execution import TableExecution
@@ -14,10 +16,11 @@ from src.app.models.task_schedule import TaskSchedule
 
 class EventBridgeSchedulerService:
     @inject
-    def __init__(self, logger: Logger, boto_service: BotoService, task_schedule_service: TaskScheduleService):
+    def __init__(self, logger: Logger, boto_service: BotoService, task_schedule_service: TaskScheduleService, approval_status_service: ApprovalStatusService):
         self.logger = logger
         self.scheduler_client = boto_service.get_client('scheduler')
         self.task_schedule_service: TaskScheduleService = task_schedule_service
+        self.approval_status_service: ApprovalStatusService = approval_status_service
 
     @staticmethod
     def dict_to_clean_string(input_dict: Dict[str, Any]) -> str:
@@ -136,44 +139,89 @@ class EventBridgeSchedulerService:
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Error during register_or_postergate_event: {e}")
             raise
+        
+    def schedule(self, task_schedule: TaskSchedule):
+        """
+        Agenda um evento no EventBridge.
+        """
+        try:
+            self.logger.info(f"[{self.__class__.__name__}] Scheduling event for schedule ID: {task_schedule.id}")
+            if self.check_event_exists(task_schedule.schedule_alias):
+                self.logger.info(f"[{self.__class__.__name__}] Found existing schedule for alias: {task_schedule.schedule_alias}. Updating event.")
+                self._update_event(task_schedule)
+            else:
+                self.logger.info(f"[{self.__class__.__name__}] No schedule found for alias: {task_schedule.schedule_alias}. Registering new event.")
+                self._register_event(task_schedule)
+        except Exception as e:
+            self.logger.error(f"[{self.__class__.__name__}] Failed to schedule event: {e}")
+            raise
 
     def register_event(self, possible_schedule: TaskSchedule, unique_alias: str, task_table: TaskTable, trigger_execution: TableExecution, partitions: Dict[str, Any]):
         """
         Registra um novo evento no EventBridge.
         """
         try:
+            table: Tables = task_table.table
             self.logger.info(f"[{self.__class__.__name__}] Registering new event for task_table ID: {task_table.id}")
             schedule_execution_time = datetime.now() + timedelta(seconds=task_table.debounce_seconds)
-            schedule_expression = schedule_execution_time.strftime("cron(%M %H %d %m ? *)")
             
             schedule_alias = f"{schedule_execution_time.strftime('%Y%m%d%H%M%S')}-{task_table.id}"[:64]
             
-            task_schedule = self.task_schedule_service.save({
+            task_schedule_dict = {
                 "id": possible_schedule.id if possible_schedule else None,
                 "task_id": task_table.id,
                 "unique_alias": unique_alias,
                 "schedule_alias": schedule_alias,
                 "table_execution_id": trigger_execution.id,
-                "scheduled_execution_time": schedule_execution_time
-            })
-
-            payload = self.build_event_payload(task_table, trigger_execution, task_schedule, partitions)
-
-            response = self.scheduler_client.create_schedule(
-                Name=schedule_alias,
-                ScheduleExpression=schedule_expression,
-                FlexibleTimeWindow={'Mode': 'OFF'},
-                Target={
-                    'Arn': task_table.task_executor.identification,
-                    'Input': json.dumps(payload),
-                    'RoleArn': task_table.task_executor.target_role_arn
-                }
-            )
-
-            self.logger.info(f"[{self.__class__.__name__}] Event registered successfully: {response.get('ScheduleArn', 'unknown')}")
+                "scheduled_execution_time": schedule_execution_time,
+                "partitions": json.dumps(partitions) if partitions else None,
+                "status": STATIC_SCHEDULE_PENDENT
+            }
+            
+            if table.requires_approval:
+                task_schedule_dict["status"] = STATIC_SCHEDULE_WAITING_APPROVAL
+            
+            task_schedule = self.task_schedule_service.save(task_schedule_dict)
+            
+            if table.requires_approval:
+                possible_task_approval = self.approval_status_service.find_by_task_schedule_id(task_schedule.id)
+                self.approval_status_service.save({
+                    "id": possible_task_approval.id if possible_task_approval else None,
+                    "task_schedule_id": task_schedule.id,
+                    "status": STATIC_APPROVE_STATUS_PENDING
+                })
+            else:
+                self._register_event(task_schedule)            
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Failed to register event: {e}")
             raise
+        
+    def _register_event(self, task_schedule: TaskSchedule):
+        trigger_execution = task_schedule.table_execution
+        partitions = json.loads(task_schedule.partitions) if task_schedule.partitions else {}
+        schedule_alias = task_schedule.schedule_alias
+        task_table = task_schedule.task_table
+        payload = self.build_event_payload(task_table, trigger_execution, task_schedule, partitions)
+        
+        schedule_execution_time = datetime.now() + timedelta(seconds=task_table.debounce_seconds)
+        schedule_expression = schedule_execution_time.strftime("cron(%M %H %d %m ? *)")
+        
+        task_schedule.scheduled_execution_time = schedule_execution_time
+        task_schedule.status = STATIC_SCHEDULE_PENDENT
+        self.task_schedule_service.save(task_schedule.dict())
+
+        response = self.scheduler_client.create_schedule(
+            Name=schedule_alias,
+            ScheduleExpression=schedule_expression,
+            FlexibleTimeWindow={'Mode': 'OFF'},
+            Target={
+                'Arn': task_table.task_executor.identification,
+                'Input': json.dumps(payload),
+                'RoleArn': task_table.task_executor.target_role_arn
+            }
+        )
+
+        self.logger.info(f"[{self.__class__.__name__}] Event registered successfully: {response.get('ScheduleArn', 'unknown')}")
 
     def postergate_event(self, schedule_alias: str, task_schedule: TaskSchedule, trigger_execution: TableExecution, partitions: Dict[str, Any]):
         """
@@ -181,36 +229,71 @@ class EventBridgeSchedulerService:
         """
         try:
             self.logger.info(f"[{self.__class__.__name__}] Postergating event for schedule ID: [{task_schedule.id}]: {schedule_alias} ({task_schedule.unique_alias})")	
+            
+            table: Tables = task_schedule.task_table.table
             schedule_execution_time = datetime.now() + timedelta(seconds=task_schedule.task_table.debounce_seconds)
-            schedule_expression = schedule_execution_time.strftime("cron(%M %H %d %m ? *)")
-
-            task_schedule = self.task_schedule_service.save({
+            
+            task_schedule_dict = {
                 "id": task_schedule.id,
                 "task_id": task_schedule.task_table.id,
                 "unique_alias": task_schedule.unique_alias,
                 "schedule_alias": schedule_alias,
                 "table_execution_id": trigger_execution.id,
-                "scheduled_execution_time": schedule_execution_time
-            })
+                "scheduled_execution_time": schedule_execution_time,
+                "partitions": json.dumps(partitions) if partitions else None,
+                "status": STATIC_SCHEDULE_PENDENT
+            }        
             
-            payload = self.build_event_payload(task_schedule.task_table, trigger_execution, task_schedule, partitions)
-
-            response = self.scheduler_client.update_schedule(
-                Name=schedule_alias,
-                ScheduleExpression=schedule_expression,
-                FlexibleTimeWindow={'Mode': 'OFF'},
-                Target={
-                    'Arn': task_schedule.task_table.task_executor.identification,
-                    'Input': json.dumps(payload),
-                    'RoleArn': task_schedule.task_table.task_executor.target_role_arn
-                }
-            )
-
-            self.logger.info(f"[{self.__class__.__name__}] Event updated successfully: {response}")
+            if table.requires_approval:
+                task_schedule_dict["status"] = STATIC_SCHEDULE_WAITING_APPROVAL
+            
+            task_schedule = self.task_schedule_service.save(task_schedule_dict)   
+            
+            if table.requires_approval:
+                possible_task_approval = self.approval_status_service.find_by_task_schedule_id(task_schedule.id)
+                self.approval_status_service.save({
+                    "id": possible_task_approval.id if possible_task_approval else None,
+                    "task_schedule_id": task_schedule.id,
+                    "status": STATIC_APPROVE_STATUS_PENDING
+                })  
+            else:
+                self._update_event(task_schedule)       
+        
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Failed to update event: {e}")
             raise
+        
+    def _update_event(self, task_schedule: TaskSchedule):
+        trigger_execution = task_schedule.table_execution
+        partitions = json.loads(task_schedule.partitions) if task_schedule.partitions else {}
+        schedule_alias = task_schedule.schedule_alias
+        
+        schedule_execution_time = datetime.now() + timedelta(seconds=task_schedule.task_table.debounce_seconds)
+        schedule_expression = schedule_execution_time.strftime("cron(%M %H %d %m ? *)")
+        
+        payload = self.build_event_payload(task_schedule.task_table, trigger_execution, task_schedule, partitions)
+        
+        task_schedule.scheduled_execution_time = schedule_execution_time
+        task_schedule.status = STATIC_SCHEDULE_PENDENT
+        self.task_schedule_service.save(task_schedule.dict())
+        possible_task_approval = self.approval_status_service.find_by_task_schedule_id(task_schedule.id)
+        
+        if possible_task_approval:
+            self.approval_status_service.approve(possible_task_approval.id, 'automatic')
 
+        response = self.scheduler_client.update_schedule(
+            Name=schedule_alias,
+            ScheduleExpression=schedule_expression,
+            FlexibleTimeWindow={'Mode': 'OFF'},
+            Target={
+                'Arn': task_schedule.task_table.task_executor.identification,
+                'Input': json.dumps(payload),
+                'RoleArn': task_schedule.task_table.task_executor.target_role_arn
+            }
+        )
+
+        self.logger.info(f"[{self.__class__.__name__}] Event updated successfully: {response}")
+        
     def delete_event(self, task_schedule: TaskSchedule):
         """
         Deleta um evento no EventBridge.
