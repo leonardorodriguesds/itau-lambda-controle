@@ -450,7 +450,22 @@ def test_should_only_trigger_task_when_all_required_partitions_are_ready_with_op
     
     assert len(all_schedules) == 1, f"Esperava 1 agendamentos, mas encontrou {len(all_schedules)}"
     
-def test_should_trigger_last_execution_process_when_call_run_without_payload(test_injector):
+@pytest.mark.parametrize(
+    "params",
+    [
+        (None),
+        ({
+            "table_name": "{{table.name}}",
+            "partitions": {
+                "ano_mes_referencia": "{{partitions.ano_mes_referencia}}",
+                "identificador_empresa": "{{partitions.identificador_empresa}}"
+            },
+            "source": "{{execution.source}}",
+            "task_alias": "{{task_table.alias}}"
+        })
+    ],
+)
+def test_should_trigger_last_execution_process_when_call_run_without_payload(test_injector, params):
     """
     Exemplo de teste para a rota /add_table,
     usando uma sessão SQLite in-memory.
@@ -575,7 +590,11 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
                             "alias": "op_enriquecido_step_function_executor",
                             "params": {
                                 "table_name": "{{table.name}}",
-                                "table_description": "{{table.description}}"
+                                "table_description": "{{table.description}}",
+                                "partitions": {
+                                    "ano_mes_referencia": "{{partitions.ano_mes_referencia}}",
+                                    "identificador_empresa": "{{partitions.identificador_empresa}}"
+                                }
                             },
                             "debounce_seconds": 30
                         }
@@ -590,7 +609,7 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
     session = session_provider.get_session()
 
     from src.app.models.task_executor import TaskExecutor
-    session.add(TaskExecutor(alias="step_function_executor", method="step_function"))
+    session.add(TaskExecutor(alias="step_function_executor", method="stepfunction_process", identification="arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine"))
     
     response = lambda_handler(
         event=event,
@@ -654,12 +673,100 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
     
     assert len(all_schedules) == 1, f"Esperava 1 agendamentos, mas encontrou {len(all_schedules)}"
     
+    _, first_value = next(iter(mock_scheduler_client._schedules.items()))
+    trigger_event = json.loads(first_value["Target"]["Input"])
+    
+    trigger_event["body"] = json.dumps(trigger_event["body"])
+    
+    trigger_response = lambda_handler(
+        event=trigger_event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+    
+    assert trigger_response["statusCode"] == 200
+    
+    table_tb_teste = session.query(Tables).filter_by(name="tb_op_enriquecido").first()
+        
+    expected_input = {
+        "execution_id": ANY,
+        "table_id": table_tb_teste.id,
+        "source": ANY,
+        "task_schedule_id": ANY,
+        "date_time": ANY,
+        "payload": {
+            "table_name": "tb_op_enriquecido",
+            "table_description": ANY,
+            "partitions": {
+                "ano_mes_referencia": "2405",
+                "identificador_empresa": "0"
+            }
+        }
+    }
+    
+    mock_step_function_client = mock_boto_service.get_client('stepfunctions')
+    assert len(mock_step_function_client._executions) == 1, (
+        "Esperava 1 execução de StepFunction, encontrou 0"
+    )
+    
+    _, exec_info = next(iter(mock_step_function_client._executions.items()))
+    
+    assert exec_info["stateMachineArn"] == "arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine", (
+        f"ARN incorreto. Esperava=arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine, obteve={exec_info['stateMachineArn']}"
+    )
+    assert json.loads(exec_info["input"]) == expected_input, (
+        f"Input incorreto. Esperava={expected_input}, obteve={json.loads(exec_info['input'])}"
+    )
+        
+    register_event = {
+        "httpMethod": "POST",
+        "path": "/register_execution",
+        "body": json.dumps({
+            "data": [
+                {
+                    "table_name": "tb_op_enriquecido",
+                    "partitions": [
+                        {"partition_name": "ano_mes_referencia", "value": "2405"},
+                        {"partition_name": "versao_processamento", "value": "1"},
+                        {"partition_name": "identificador_empresa", "value": "0"}
+                    ],
+                    "source": "glue"
+                }
+            ],
+            "user": "lrcxpnu"
+        })
+    }
+
+    mock_boto_service = test_injector.get(BotoService)
+    mock_scheduler_client = mock_boto_service.get_client('scheduler')
+
+    register_response = lambda_handler(
+        event=register_event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+    
+    assert register_response["statusCode"] == 200
+    
+    from src.app.models.table_partition_exec import TablePartitionExec
+    all_execs = session.query(TablePartitionExec).all()
+    assert len(all_execs) == (1 * 3) + (1 * 3) + (1 * 3), f"Esperava {(1 * 3) + (1 * 3) + (1 * 3)} execuções, mas encontrou {len(all_execs)}"
+    
+    table_op_enriquecido = session.query(Tables).filter(Tables.name == "tb_op_enriquecido").first()
+    table_execution_op_enriquecido = session.query(TableExecution).filter(TableExecution.table_id == table_op_enriquecido.id).first()
+    
+    assert table_execution_op_enriquecido is not None
+    assert table_execution_op_enriquecido.source == "glue"
+    
     register_event = {
         "httpMethod": "POST",
         "path": "/run",
         "body": json.dumps({
             "table_name": "tb_op_enriquecido",
             "task_name": "op_enriquecido_step_function_executor",
+            "params": params,
             "user": "lrcxpnu"
         })
     }
@@ -670,3 +777,36 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
         injected_injector=test_injector,
         debug=True
     )
+    
+    assert run_response["statusCode"] == 200
+    
+    assert len(mock_step_function_client._executions) == 2, f"Esperava 2 execuções de StepFunction, encontrou {len(mock_step_function_client._executions)}"
+    
+    _, exec_info = next(reversed(mock_step_function_client._executions.items()))
+    assert exec_info["stateMachineArn"] == "arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine", (
+        f"ARN incorreto. Esperava=arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine, obteve={exec_info['stateMachineArn']}"
+    )
+    
+    if params is None:
+        assert json.loads(exec_info["input"]) == expected_input, (
+            f"Input incorreto. Esperava={expected_input}, obteve={json.loads(exec_info['input'])}"
+        )
+    else:
+        assert json.loads(exec_info["input"]) != expected_input, (
+            f"Input incorreto. Esperava={expected_input}, obteve={json.loads(exec_info['input'])}"
+        )
+        
+        new_expected_input = expected_input.copy()
+        new_expected_input["payload"] = {
+            "table_name": "tb_op_enriquecido",
+            "partitions": {
+                "ano_mes_referencia": "2405",
+                "identificador_empresa": "0"
+            },
+            "source": "glue",
+            "task_alias": "op_enriquecido_step_function_executor"
+        }
+        
+        assert json.loads(exec_info["input"]) == new_expected_input, (
+            f"Input incorreto. Esperava={new_expected_input}, obteve={json.loads(exec_info['input'])}"
+        )

@@ -5,6 +5,7 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from src.app.config.constants import STATIC_SCHEDULE_COMPLETED
 from src.app.models.base import Base  
 from lambda_function import lambda_handler
 from src.app.config.config import AppModule
@@ -1062,11 +1063,11 @@ def test_add_table_and_register_executions_and_trigger_process(
         "execution_id": ANY,
         "table_id": table_tb_teste.id,
         "source": execution_source,
+        "task_schedule_id": schedule_id,
         "date_time": ANY,
         "payload": {
             "table_name": "tb_op_enriquecido",
-            "table_description": ANY,
-            'unique_alias': schedule_unique_alias
+            "table_description": ANY
         }
     }
     
@@ -1155,6 +1156,43 @@ def test_add_table_and_register_executions_and_trigger_process(
 
     else:
         pytest.fail(f"Executor method desconhecido: {executor_method}")
+        
+    register_event = {
+        "httpMethod": "POST",
+        "path": "/register_execution",
+        "body": json.dumps({
+            "data": [
+                {
+                    "table_name": "tb_op_enriquecido",
+                    "partitions": [
+                        {"partition_name": "ano_mes_referencia", "value": "2405"},
+                        {"partition_name": "versao_processamento", "value": "1"},
+                        {"partition_name": "identificador_empresa", "value": "0"}
+                    ],
+                    "source": "glue",
+                    "task_schedule_id": schedule_id
+                }
+            ],
+            "user": "lrcxpnu"
+        })
+    }
+
+    mock_boto_service = test_injector.get(BotoService)
+    mock_scheduler_client = mock_boto_service.get_client('scheduler')
+
+    register_response = lambda_handler(
+        event=register_event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+    
+    assert register_response["statusCode"] == 200
+    
+    all_schedules = session.query(TaskSchedule).all()
+    task_schedule = all_schedules[0]
+    assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
+    assert task_schedule.status == STATIC_SCHEDULE_COMPLETED, f"Esperava status '{STATIC_SCHEDULE_COMPLETED}', mas encontrou {task_schedule.status}"
 
     print(f"Teste para {executor_method} passou com sucesso")
     

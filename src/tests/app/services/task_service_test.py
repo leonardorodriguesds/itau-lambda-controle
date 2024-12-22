@@ -18,6 +18,7 @@ def task_service():
     task_table_service = MagicMock()
     boto_service = MagicMock()
     task_schedule_service = MagicMock()
+    event_bridge_scheduler_service = MagicMock()
 
     return TaskService(
         logger,
@@ -28,6 +29,7 @@ def task_service():
         task_table_service,
         boto_service,
         task_schedule_service,
+        event_bridge_scheduler_service
     )
 
 def test_trigger_tables_success(task_service):

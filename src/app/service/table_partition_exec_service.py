@@ -164,15 +164,22 @@ class TablePartitionExecService:
 
             self.logger.debug(f"[{self.__class__.__name__}] Triggering dependent tables for execution ID: {new_execution.id}")
             self.trigger_tables(new_execution.table_id)
+            
+            if dto.task_schedule_id:
+                self.event_bridge_scheduler_service.finish_with_success(dto.task_schedule_id, new_execution)
             return {"message": "Table partition execution entries registered successfully."}
         
         except TableInsertError as e:
             self.logger.error(f"[{self.__class__.__name__}] Table insertion error: {str(e)}")
             error_count += 1
+            if dto.task_schedule_id:
+                self.event_bridge_scheduler_service.finish_with_error(dto.task_schedule_id, str(e))
             raise e
         except Exception as e:
             self.logger.error(f"[{self.__class__.__name__}] Error registering partition executions: {str(e)}")
             error_count += 1
+            if dto.task_schedule_id:
+                self.event_bridge_scheduler_service.finish_with_error(dto.task_schedule_id, str(e))
             raise TableInsertError(f"Erro ao registrar execuções de partições: {str(e)}")
         finally:
             total_execution_time = (datetime.utcnow() - start_time).total_seconds() * 1000

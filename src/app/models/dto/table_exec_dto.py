@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, Optional
 from pydantic import BaseModel
 
 from src.app.models.table_execution import TableExecution
@@ -14,7 +14,7 @@ class TableExecDTO(BaseModel):
     date: datetime
     execution: int
     
-def transform_to_table_exec_dto(execution: TableExecution, dependencies_executions: Dict[str, Dict[str, Any]]) -> TableExecDTO:
+def transform_to_table_exec_dto(execution: TableExecution, dependencies_executions: Optional[Dict[str, Dict[str, Any]]] = {}) -> TableExecDTO:
     """
     Transforma uma instância de TableExecution e uma lista de TablePartitionExec em um TableExecDTO.
     
@@ -22,6 +22,9 @@ def transform_to_table_exec_dto(execution: TableExecution, dependencies_executio
     :param partition_execs: Lista de TablePartitionExec associadas.
     :return: TableExecDTO.
     """
+    
+    if not execution:
+        raise ValueError("Execution is required")
 
     dto = TableExecDTO(
         id=execution.id,

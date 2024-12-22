@@ -5,6 +5,7 @@ import requests
 from src.app.config.constants import STATIC_SCHEDULE_IN_PROGRESS, STATIC_SCHEDULE_PENDENT
 from src.app.models.dto.trigger_process_dto import TriggerProcess
 from src.app.models.task_schedule import TaskSchedule
+from src.app.service.event_bridge_scheduler_service import EventBridgeSchedulerService
 from src.app.service.task_schedule_service import TaskScheduleService
 from src.app.service.boto_service import BotoService
 from src.app.models.table_execution import TableExecution
@@ -36,7 +37,8 @@ class TaskService:
             cloudwatch_service: CloudWatchService, 
             task_table_service: TaskTableService, 
             boto_service: BotoService,
-            task_schedule_service: TaskScheduleService
+            task_schedule_service: TaskScheduleService,
+            event_bridge_scheduler_service: EventBridgeSchedulerService
         ):
         self.logger = logger
         self.table_execution_service = table_execution_service
@@ -46,6 +48,7 @@ class TaskService:
         self.task_table_service = task_table_service
         self.boto_service = boto_service
         self.task_schedule_service = task_schedule_service
+        self.event_bridge_scheduler_service = event_bridge_scheduler_service
         
     def run(self, trigger_process: TriggerProcess):
         """
@@ -60,12 +63,21 @@ class TaskService:
             )
             last_execution = self.table_execution_service.get_latest_execution(task_table.table_id)
             
-            partitions_dict = {
-                p.partition.name: p.value
-                for p in self.table_partition_exec_service.get_by_execution(last_execution.id)
-            }
+            partitions_dict = {}
+            if last_execution:
+                partitions_dict = {
+                    p.partition.name: p.value
+                    for p in self.table_partition_exec_service.get_by_execution(last_execution.id)
+                }
+                
+            task_schedule = self.task_schedule_service.save({
+                "unique_alias": self.event_bridge_scheduler_service.generate_unique_alias(task_table, last_execution, partitions_dict),
+                "task_id": task_table.id,
+                "scheduled_execution_time": datetime.now(),
+                "table_execution_id": last_execution.id,
+            })
             
-            self.process(None, task_table, last_execution, partitions_dict, trigger_process.params)
+            self.process(task_schedule, task_table, last_execution, partitions_dict, trigger_process.params)
         except Exception as e:
             self.logger.exception(f"[{self.__class__.__name__}] Erro ao acionar tabelas: {str(e)}")
             self.cloudwatch_service.add_metric("TriggerTablesErrorCount", 1, "Count")
@@ -148,21 +160,17 @@ class TaskService:
         self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Iniciando processamento.")
         try:
             task: TaskExecutor = task_table.task_executor
-            table_info = transform_to_table_exec_dto(execution, dependencies_partitions)
                 
             self.logger.debug(f"[{self.__class__.__name__}][{task_table.table.name}] Parâmetros da tarefa: {task_table.params}({type(task_table.params)})")
 
             payload = self._interpolate_payload(
                 params if params else task_table.params,
                 table=task_table.table,
-                partitions=dependencies_partitions,
+                partitions=self._sanitize_partitions(dependencies_partitions),
                 execution=execution,
                 task=task,
-                task_table=task_table,
-                table_info=table_info,
+                task_table=task_table
             )
-
-            payload["unique_alias"] = task_schedule.unique_alias
 
             method_map = {
                 "stepfunction_process": self.stepfunction_process,
@@ -174,7 +182,7 @@ class TaskService:
             }
 
             if task.method in method_map:
-                response = method_map[task.method](task_table, execution, payload, task)
+                response = method_map[task.method](task_table, execution, payload, task, task_schedule)
                 self.cloudwatch_service.add_metric(f"{task.method.capitalize()}Count", 1, "Count")
 
                 if response:
@@ -194,6 +202,28 @@ class TaskService:
             self.logger.exception(f"[{self.__class__.__name__}][{task_table.table.name}] Erro no processamento: {str(e)}")
             self.cloudwatch_service.add_metric("ProcessingErrors", 1, "Count")
             raise
+        
+    def _sanitize_partitions(self, partitions):
+        chaves_particoes = [
+            set(tabela.keys()) 
+            for tabela in partitions.values() 
+            if isinstance(tabela, dict) and tabela
+        ]
+        
+        if not chaves_particoes:
+            return partitions
+        
+        chaves_comuns = set.intersection(*chaves_particoes)
+        
+        if not chaves_comuns:
+            return partitions
+        
+        for chave in chaves_comuns:
+            for tabela in partitions.values():
+                if chave in tabela:
+                    partitions[chave] = tabela[chave]
+                    break         
+        return partitions
 
     def _interpolate_payload(self, payload: Optional[dict], **kwargs) -> dict:
         """
@@ -215,7 +245,7 @@ class TaskService:
             self.logger.exception(f"[{self.__class__.__name__}] Erro ao interpolar payload: {e}")
             raise
 
-    def stepfunction_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+    def stepfunction_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor, task_schedule: TaskSchedule) -> Dict[str, Any]:
         """
         Chama uma Step Function enviando um payload JSON.
 
@@ -235,6 +265,7 @@ class TaskService:
                 "table_id": task_table.table.id,
                 "source": execution.source,
                 "date_time": execution.date_time.isoformat(),
+                "task_schedule_id": task_schedule.id if task_schedule else None,
                 "payload": payload 
             }
 
@@ -264,7 +295,7 @@ class TaskService:
                 "error": str(e)
             }
 
-    def sqs_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+    def sqs_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor, task_schedule: TaskSchedule) -> Dict[str, Any]:
         """
         Envia uma mensagem para uma fila SQS.
 
@@ -281,6 +312,7 @@ class TaskService:
                 "table_id": task_table.table.id,
                 "source": execution.source,
                 "date_time": execution.date_time.isoformat(),
+                "task_schedule_id": task_schedule.id if task_schedule else None,
                 "payload": payload 
             }
             response = sqs_client.send_message(
@@ -303,7 +335,7 @@ class TaskService:
                 "error": str(e)
             }
 
-    def glue_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+    def glue_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor, task_schedule: TaskSchedule) -> Dict[str, Any]:
         """
         Inicia um job do AWS Glue com um payload específico.
 
@@ -320,6 +352,7 @@ class TaskService:
                 "table_id": task_table.table.id,
                 "source": execution.source,
                 "date_time": execution.date_time.isoformat(),
+                "task_schedule_id": task_schedule.id if task_schedule else None,
                 "payload": payload 
             }
             response = glue_client.start_job_run(
@@ -342,7 +375,7 @@ class TaskService:
                 "error": str(e)
             }
 
-    def lambda_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+    def lambda_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor, task_schedule: TaskSchedule) -> Dict[str, Any]:
         """
         Invoca uma função Lambda com um payload específico.
 
@@ -359,6 +392,7 @@ class TaskService:
                 "table_id": task_table.table.id,
                 "source": execution.source,
                 "date_time": execution.date_time.isoformat(),
+                "task_schedule_id": task_schedule.id if task_schedule else None,
                 "payload": payload 
             }
             response = lambda_client.invoke(
@@ -381,7 +415,7 @@ class TaskService:
                 "error": str(e)
             }
 
-    def eventbridge_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+    def eventbridge_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor, task_schedule: TaskSchedule) -> Dict[str, Any]:
         """
         Envia um evento para o AWS EventBridge com um payload específico.
 
@@ -397,7 +431,8 @@ class TaskService:
                 "execution_id": execution.id,
                 "table_id": task_table.table.id,
                 "source": execution.source,
-                "date_time": execution.date_time.isoformat(),
+                "date_time": execution.date_time.isoformat(),                
+                "task_schedule_id": task_schedule.id if task_schedule else None,
                 "payload": payload 
             }
             response = eventbridge_client.put_events(
@@ -425,7 +460,7 @@ class TaskService:
                 "error": str(e)
             }
 
-    def api_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor) -> Dict[str, Any]:
+    def api_process(self, task_table: TaskTable, execution: TableExecution, payload: dict, task_executor: TaskExecutor, task_schedule: TaskSchedule) -> Dict[str, Any]:
         """
         Faz uma chamada HTTP POST para uma API externa com um payload específico.
 
@@ -442,6 +477,7 @@ class TaskService:
                 "table_id": task_table.table.id,
                 "source": execution.source,
                 "date_time": execution.date_time.isoformat(),
+                "task_schedule_id": task_schedule.id if task_schedule else None,
                 "payload": payload 
             }
             response = requests_client.post(task_executor.identification, json=payload_with_metadata)

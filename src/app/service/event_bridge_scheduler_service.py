@@ -5,6 +5,7 @@ from logging import Logger
 from typing import Any, Dict
 from injector import inject
 
+from src.app.config.constants import STATIC_SCHEDULE_COMPLETED, STATIC_SCHEDULE_FAILED
 from src.app.service.task_schedule_service import TaskScheduleService
 from src.app.service.boto_service import BotoService
 from src.app.models.table_execution import TableExecution
@@ -29,6 +30,32 @@ class EventBridgeSchedulerService:
             clean_value = re.sub(r'[^a-zA-Z0-9]', '', str(value))
             clean_items.append(f"{clean_key}={clean_value}")
         return '-'.join(clean_items)
+    
+    def finish_with_success(self, task_schedule_id: int, table_execution: TableExecution):
+        """
+        Finaliza um agendamento com sucesso.
+        """
+        task_schedule = self.task_schedule_service.find(task_schedule_id)
+        if task_schedule:
+            self.logger.info(f"[{self.__class__.__name__}] Finishing task schedule with success: {task_schedule_id}")
+            task_schedule.status = STATIC_SCHEDULE_COMPLETED
+            task_schedule.result_execution_id = table_execution.id
+            self.task_schedule_service.save(task_schedule.dict())
+        else:
+            self.logger.error(f"[{self.__class__.__name__}] Task schedule not found: {task_schedule_id}")
+            
+    def finish_with_error(self, task_schedule_id: int, error_message: str):
+        """
+        Finaliza um agendamento com erro.
+        """
+        task_schedule = self.task_schedule_service.find(task_schedule_id)
+        if task_schedule:
+            self.logger.info(f"[{self.__class__.__name__}] Finishing task schedule with error: {task_schedule_id}")
+            task_schedule.status = STATIC_SCHEDULE_FAILED
+            task_schedule.error_message = error_message
+            self.task_schedule_service.save(task_schedule)
+        else:
+            self.logger.error(f"[{self.__class__.__name__}] Task schedule not found: {task_schedule_id}")
 
     def generate_unique_alias(self, task_table: TaskTable, last_execution: TableExecution, partitions: Dict[str, Any]) -> str:
         """

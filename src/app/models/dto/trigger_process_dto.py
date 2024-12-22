@@ -7,4 +7,4 @@ class TriggerProcess(BaseModel):
     table_name: Optional[str] = Field(None, description="Nome da tabela. Opcional se `table_id` for fornecido.")
     task_id: Optional[int] = Field(None, description="ID da tarefa. Opcional se `task_name` for fornecido.")
     task_name: Optional[str] = Field(None, description="Nome da tarefa. Opcional se `task_id` for fornecido.")
-    params: Optional[str] = Field(None, description="Parâmetros da tarefa.")
+    params: Optional[dict] = Field(None, description="Parâmetros da tarefa.")

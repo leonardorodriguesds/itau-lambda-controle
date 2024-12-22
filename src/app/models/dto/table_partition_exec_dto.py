@@ -12,3 +12,4 @@ class TablePartitionExecDTO(BaseModel):
     partitions: List[PartitionDTO] = Field(..., description="Lista de partições e valores.")
     user: str = Field(..., max_length=255, description="Usuário que executou.")
     source: str = Field(..., max_length=255, description="Origem da execução.")
+    task_schedule_id: Optional[int] = Field(None, description="ID do agendamento da tarefa. Opcional.")
