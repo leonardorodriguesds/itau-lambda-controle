@@ -10,7 +10,6 @@ from lambda_function import lambda_handler
 from src.app.config.config import AppModule
 from src.app.models.table_execution import TableExecution
 from src.app.models.tables import Tables
-from src.app.models.task_executor import TaskExecutor
 from src.app.provider.session_provider import SessionProvider
 from src.app.service.boto_service import BotoService
 from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService, MockEventsClient, MockGlueClient, MockLambdaClient, MockRequestsClient, MockSQSClient, MockSchedulerClient, MockStepFunctionClient

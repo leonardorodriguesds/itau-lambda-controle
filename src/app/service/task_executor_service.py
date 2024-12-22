@@ -3,6 +3,8 @@ from typing import Optional
 
 from injector import inject
 from aws_lambda_powertools.event_handler.exceptions import NotFoundError
+from src.app.models.dto.task_executor_dto import TaskExecutorDTO
+from src.app.models.task_executor import TaskExecutor
 from src.app.repositories.task_executor_repository import TaskExecutorRepository
 
 class TaskExecutorService:
@@ -25,3 +27,11 @@ class TaskExecutorService:
             return task_executor
         else:
             raise Exception("Task executor id or alias is required.")
+        
+    def save(self, task_executor_dto: TaskExecutorDTO):
+        self.logger.debug(f"[{self.__class__.__name__}] Saving task executor: [{task_executor_dto}]")
+        return self.repository.save(TaskExecutor(**task_executor_dto.model_dump()))
+    
+    def delete(self, task_executor_id: int):
+        self.logger.debug(f"[{self.__class__.__name__}] Deleting task executor: [{task_executor_id}]")
+        return self.repository.soft_delete(task_executor_id)

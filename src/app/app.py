@@ -13,8 +13,10 @@ from aws_lambda_powertools.event_handler import ApiGatewayResolver
 from aws_lambda_powertools.event_handler.exceptions import BadRequestError
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
+from src.app.models.dto.task_executor_dto import TaskExecutorDTO
 from src.app.models.dto.trigger_process_dto import TriggerProcess
 from src.app.service.cloud_watch_service import CloudWatchService
+from src.app.service.task_executor_service import TaskExecutorService
 from src.app.service.task_service import TaskService
 from injector import Injector
 from src.app.models.dto.table_dto import TableDTO
@@ -321,6 +323,41 @@ class LambdaHandler:
                 raise BadRequestError("Task ID or name is required in payload")
 
             task_service.run(payload)
+
+            logger.info(f"Event processed successfully.")
+            return {"message": "Task processed successfully."}
+        
+        @self.app.post("/task_executor")
+        @self.inject_dependencies
+        @self.transactional
+        def task_executor(
+            task_executor_service: TaskExecutorService, 
+            logger: Logger, 
+            session_provider: SessionProvider
+        ):
+            body = self.app.current_event.json_body
+            payload = TaskExecutorDTO(**body)
+
+            if not payload:
+                raise BadRequestError("Payload is required")
+
+            task_executor_service.save(payload)
+
+            logger.info(f"Event processed successfully.")
+            return {"message": "Task processed successfully."}
+        
+        @self.app.delete("/task_executor/{task_executor_id}", summary="Excluir uma tarefa por ID", tags=["Task Executor"])
+        @self.inject_dependencies
+        @self.transactional
+        def task_executor(
+            task_executor_id: int,
+            task_executor_service: TaskExecutorService,
+            logger: Logger,
+            session_provider: SessionProvider
+        ):
+            if not task_executor_id:
+                raise BadRequestError("Task ID is required")
+            task_executor_service.delete(task_executor_id)
 
             logger.info(f"Event processed successfully.")
             return {"message": "Task processed successfully."}
