@@ -457,7 +457,7 @@ def test_should_only_trigger_task_when_all_required_partitions_are_ready_with_op
         ({
             "table_name": "{{table.name}}",
             "partitions": {
-                "ano_mes_referencia": "{{partitions.ano_mes_referencia}}",
+                "ano_mes_referencia": "{{partitions.ano_mes_referencia | int - 1}}",
                 "identificador_empresa": "{{partitions.identificador_empresa}}"
             },
             "source": "{{execution.source}}",
@@ -800,7 +800,7 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
         new_expected_input["payload"] = {
             "table_name": "tb_op_enriquecido",
             "partitions": {
-                "ano_mes_referencia": "2405",
+                "ano_mes_referencia": "2404",
                 "identificador_empresa": "0"
             },
             "source": "glue",

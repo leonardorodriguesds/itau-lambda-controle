@@ -139,7 +139,6 @@ class LambdaHandler:
             session_provider: SessionProvider = kwargs.get('session_provider')
             logger = kwargs.get('logger')
 
-            # body do evento atual
             body = self.app.current_event.json_body
             data = body.get("data")
             user = body.get("user")
