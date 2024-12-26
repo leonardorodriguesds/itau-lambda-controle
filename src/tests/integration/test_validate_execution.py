@@ -78,12 +78,12 @@ def test_injector(db_session, mock_boto_service):
 
 def test_add_table_route(test_injector):
     """
-    Exemplo de teste para a rota /add_table,
+    Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
     """
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {
@@ -121,12 +121,12 @@ def test_add_table_route(test_injector):
     
 def test_add_table_route_with_partitions(test_injector):
     """
-    Exemplo de teste para a rota /add_table,
+    Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
     """
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {
@@ -174,12 +174,12 @@ def test_add_table_route_with_partitions(test_injector):
     
 def test_add_table_route_with_partitions_and_tasks(test_injector):
     """
-    Exemplo de teste para a rota /add_table,
+    Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
     """
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {
@@ -246,14 +246,14 @@ def test_add_table_route_with_partitions_and_tasks(test_injector):
     
 def test_add_table_route_with_dependencies(test_injector):
     """
-    Exemplo de teste para a rota /add_table,
+    Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
     Verifica a criação de múltiplas tabelas, suas partições
     e as dependências em tb_op_enriquecido.
     """
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {
@@ -439,7 +439,7 @@ def test_add_table_route_with_dependencies(test_injector):
 
 def test_add_table_and_register_executions(test_injector):
     """
-    1) Cria múltiplas tabelas (rota /add_table).
+    1) Cria múltiplas tabelas (rota /tables).
     2) Verifica se foram salvas corretamente.
     3) Registra execução (rota /register_execution).
     4) Verifica se retornou HTTP 200.
@@ -447,7 +447,7 @@ def test_add_table_and_register_executions(test_injector):
 
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {
@@ -740,7 +740,7 @@ def test_add_table_and_register_executions_and_trigger_process(
 ):
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {

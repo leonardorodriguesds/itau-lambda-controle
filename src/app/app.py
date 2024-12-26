@@ -33,18 +33,17 @@ class LambdaHandler:
     Classe responsável por:
       1. Instanciar o ApiGatewayResolver (app).
       2. Conter os decorators (inject_dependencies, transactional, process_entities).
-      3. Definir rotas (add_table, update_table, etc.).
+      3. Definir rotas organizadas por entidade.
       4. Expor um lambda_handler para ser usado na AWS Lambda.
     """
 
     def __init__(self, injector: Injector, app_resolver: ApiGatewayResolver):
         """
-        :param cloudwatch_service: instância do serviço de métricas (CloudWatchService)
-        :param logger: instância de logger configurada
-        :param app_resolver: instância do ApiGatewayResolver (ou qualquer outro roteador)
+        :param injector: Instância do Injector para injeção de dependências.
+        :param app_resolver: Instância do ApiGatewayResolver (ou qualquer outro roteador).
         """
         self.injector = injector
-        self.cloudwatch_service =  self.injector.get(CloudWatchService)
+        self.cloudwatch_service = self.injector.get(CloudWatchService)
         self.logger = self.injector.get(Logger)
         self.app = app_resolver
         self.define_routes()
@@ -61,13 +60,17 @@ class LambdaHandler:
         route_called = event.get('path', 'unknown')
 
         try:
-            self.logger.info(f"Processing event on route: {route_called}")
-            
+            self.logger.info(f"[{self.__class__.__name__}] Processing event on route: {route_called}")
             response = self.app.resolve(event, context)
 
         except Exception as e:
             stack_trace = traceback.format_exc()
-            response = {"message": "Error processing event", "error": str(e), "stacktrace": stack_trace, "statusCode": 500}
+            response = {
+                "message": "Error processing event",
+                "error": str(e),
+                "stacktrace": stack_trace,
+                "statusCode": 500
+            }
             error_count += 1
 
         finally:
@@ -99,7 +102,7 @@ class LambdaHandler:
             dependencies = {
                 param_name: self.injector.get(param.annotation)
                 for param_name, param in func_signature.parameters.items()
-                if param.annotation is not param.empty
+                if param.annotation is not param.empty and param_name not in kwargs
             }
             self.logger.debug(f"[{self.__class__.__name__}] Dependencies injected for {func.__name__}: {dependencies}")
             return func(*args, **dependencies, **kwargs)
@@ -114,7 +117,7 @@ class LambdaHandler:
         """
         @wraps(func)
         def wrapper(*args, **kwargs):
-            session_provider = kwargs.get("session_provider")
+            session_provider: SessionProvider = kwargs.get("session_provider")
             if not session_provider:
                 raise ValueError(
                     "`session_provider` é obrigatório para usar o decorator `@transactional`."
@@ -127,7 +130,7 @@ class LambdaHandler:
                 session_provider.rollback()
                 logger = kwargs.get("logger")
                 if logger:
-                    logger.exception(f"Erro na execução de {func.__name__}: {str(e)}")
+                    logger.exception(f"[{self.__class__.__name__}] Erro na execução de {func.__name__}: {str(e)}")
                 raise
             finally:
                 session_provider.close()
@@ -161,10 +164,10 @@ class LambdaHandler:
                             message = func(*args, **kwargs)
                             messages.append(message)
                             session_provider.commit()
-                            logger.debug(f"Entity processed successfully: {item}")
+                            logger.debug(f"[{self.__class__.__name__}] Entity processed successfully: {item}")
                         except Exception as e:
                             session_provider.rollback()
-                            logger.error(f"Error processing entity: {item}. Error: {e}")
+                            logger.error(f"[{self.__class__.__name__}] Error processing entity: {item}. Error: {e}")
                             raise
                 else:
                     kwargs["entity_data"] = data
@@ -176,7 +179,7 @@ class LambdaHandler:
                 return {"message": "All entities processed successfully.", "details": messages}
             except Exception as e:
                 session_provider.rollback()
-                logger.exception(f"Error processing entities: {e}")
+                logger.exception(f"[{self.__class__.__name__}] Error processing entities: {e}")
                 raise
             finally:
                 session_provider.close()
@@ -185,18 +188,28 @@ class LambdaHandler:
 
     def define_routes(self):
         """
-        Método que 'registra' (anota) as rotas no self.app.
-        Cada rota recebe os decoradores definidas acima.
+        Método que registra as rotas organizadas por entidade.
+        """
+        self.define_migration_routes()
+        self.define_approval_routes()
+        self.define_table_routes()
+        self.define_table_partition_exec_routes()  
+        self.define_trigger_routes()
+        self.define_task_executor_routes()
+        self.define_health_route()
+
+    def define_migration_routes(self):
+        """
+        Define as rotas relacionadas a migrações.
         """
         @self.app.post("/run_migrations")
         @self.inject_dependencies
         def run_migrations(logger: Logger):
             """
-            Exemplo de rota que, mediante uma palavra-chave no body,
-            executa as migrações do Alembic.
+            Rota que executa migrações do Alembic mediante uma palavra-chave no body.
             """
             body = self.app.current_event.json_body
-            keyword = body.get("keyword") 
+            keyword = body.get("keyword")
 
             if keyword != os.getenv("MIGRATION_KEYWORD", "RUN_MIGRATIONS"):
                 logger.warning("Tentativa de executar migrações sem keyword válida.")
@@ -212,109 +225,168 @@ class LambdaHandler:
             return {
                 "message": "Migrations ran successfully."
             }
-        
+
+    def define_approval_routes(self):
+        """
+        Define as rotas relacionadas a aprovação de tarefas.
+        """
         @self.app.post("/approve")
         @self.inject_dependencies
         @self.transactional
         def approve_task(
             approval_status_service: ApprovalStatusService,
             event_bridge_schedule_service: EventBridgeSchedulerService,
-            session_provider: SessionProvider, 
+            session_provider: SessionProvider,
             logger: Logger
         ):
             body = self.app.current_event.json_body
-            aproval_status_id = body.get("approval_status_id")
+            approval_status_id = body.get("approval_status_id")
             user = body.get("user")
 
-            if not aproval_status_id:
-                raise BadRequestError("aproval_status_id is required")
+            if not approval_status_id:
+                raise BadRequestError("approval_status_id is required")
 
-            approval_status = approval_status_service.approve(aproval_status_id, user)
-            
+            approval_status = approval_status_service.approve(approval_status_id, user)
+
             event_bridge_schedule_service.schedule(approval_status.task_schedule)
-            
-            logger.info(f"Event processed successfully.")
+
+            logger.info("Event processed successfully.")
             return {"message": "Task approved successfully."}
-        
+
         @self.app.post("/reject")
         @self.inject_dependencies
         @self.transactional
         def reject_task(
             approval_status_service: ApprovalStatusService,
-            session_provider: SessionProvider, 
+            session_provider: SessionProvider,
             logger: Logger
         ):
             body = self.app.current_event.json_body
-            aproval_status_id = body.get("approval_status_id")
+            approval_status_id = body.get("approval_status_id")
             user = body.get("user")
 
-            if not aproval_status_id:
-                raise BadRequestError("aproval_status_id is required")
+            if not approval_status_id:
+                raise BadRequestError("approval_status_id is required")
 
-            approval_status_service.reject(aproval_status_id, user)
-            
-            logger.info(f"Event processed successfully.")
-            return {"message": "Task approved successfully."}
+            approval_status_service.reject(approval_status_id, user)
 
-        @self.app.get("/health")
-        @self.inject_dependencies
-        def health_check(logger: Logger):
-            logger.info("Health check route accessed")
-            return {"status": "OK"}
+            logger.info("Event processed successfully.")
+            return {"message": "Task rejected successfully."}
 
-        @self.app.post("/add_table")
+    def define_table_routes(self):
+        """
+        Define as rotas relacionadas a tabelas.
+        """
+        @self.app.route("/tables", method="POST")
         @self.inject_dependencies
         @self.process_entities
-        def add_table(
-            table_service: TableService, 
-            entity_data: dict,  
-            user: str,  
-            session_provider: SessionProvider, 
+        def create_table(
+            table_service: TableService,
+            entity_data: dict,
+            user: str,
+            session_provider: SessionProvider,
             logger: Logger
         ):
+            """
+            Rota para criar uma nova tabela.
+            """
             table_dto = TableDTO(**entity_data)
-            message = table_service.save_table(table_dto, user)
-            return message
 
-        @self.app.post("/update_table")
+            if table_dto.id:
+                raise BadRequestError("ID não deve ser fornecido para criação de tabela")
+
+            message = table_service.save_table(table_dto, user)
+            logger.info(f"Tabela criada com sucesso: {message}")
+            return message, 201  
+
+        @self.app.put("/tables/<table_id>", summary="Atualizar uma tabela existente", tags=["Tables"])
+        @self.inject_dependencies
+        @self.process_entities
+        def update_table(
+            table_id: int,
+            table_service: TableService,
+            entity_data: dict,
+            user: str,
+            session_provider: SessionProvider,
+            logger: Logger
+        ):
+            """
+            Rota para atualizar uma tabela existente.
+            """
+            if not table_id:
+                raise BadRequestError("Table ID is required for update")
+            
+            table_dto = TableDTO(**entity_data)
+            table_dto.id = table_id
+
+            message = table_service.save_table(table_dto, user)
+            logger.info(f"Tabela atualizada com sucesso: {message}")
+            return message, 200  
+        
+        @self.app.delete("/tables/<table_id>", summary="Excluir uma tabela por ID", tags=["Tables"])
         @self.inject_dependencies
         @self.transactional
-        def update_table(
-            table_service: TableService, 
-            session_provider: SessionProvider, 
+        def delete_table(
+            table_id: int,
+            table_service: TableService,
+            session_provider: SessionProvider,
             logger: Logger
         ):
-            body = self.app.current_event.json_body
-            data = body.get("data")
-            user = body.get("user")
+            """
+            Rota para excluir uma tabela específica pelo seu ID.
+            """
+            if not table_id:
+                raise BadRequestError("Table ID is required for deletion")
 
-            if not data:
-                raise ValueError("Data is required")
+            logger.info(f"Attempting to delete table with ID: {table_id}")
+            table_service.delete(table_id)
+            logger.info(f"Table with ID: {table_id} deleted successfully.")
+            return {"message": f"Table with ID {table_id} deleted successfully."}
 
-            table = TableDTO(**data)
-            message = table_service.save_table(table, user)
-            return {"message": message}
+        @self.app.get("/tables")
+        @self.inject_dependencies
+        def get_tables(
+            table_service: TableService,
+            logger: Logger
+        ):
+            logger.debug(f"[{self.__class__.__name__}] Getting tables: {self.app.current_event.query_string_parameters}")
+            filters = self.app.current_event.query_string_parameters
+            tables = table_service.query(**filters)
+            logger.debug(f"[{self.__class__.__name__}] Tables found: {tables}")
+            return [table.json_dict() for table in tables]
 
+    def define_table_partition_exec_routes(self):
+        """
+        Define as rotas relacionadas à execução de partições de tabelas.
+        """
         @self.app.post("/register_execution")
         @self.inject_dependencies
         @self.process_entities
         def register_execution(
-            table_partition_exec_service: TablePartitionExecService, 
-            entity_data: dict,  
-            user: str,  
-            session_provider: SessionProvider, 
+            table_partition_exec_service: TablePartitionExecService,
+            entity_data: dict,
+            user: str,
+            session_provider: SessionProvider,
             logger: Logger
         ):
+            """
+            Rota para registrar a execução de partições de tabelas.
+            """
             execution_dto = TablePartitionExecDTO(**entity_data, user=user)
             message = table_partition_exec_service.register_partitions_exec(execution_dto)
-            return message
+            logger.info("Execution registered successfully.")
+            return {"message": "Execution registered successfully."}
 
+    def define_trigger_routes(self):
+        """
+        Define as rotas relacionadas a triggers e processos.
+        """
         @self.app.post("/trigger")
         @self.inject_dependencies
         @self.transactional
         def trigger_event(
-            task_service: TaskService, 
-            logger: Logger, 
+            task_service: TaskService,
+            logger: Logger,
             session_provider: SessionProvider
         ):
             payload = self.app.current_event.json_body
@@ -339,8 +411,8 @@ class LambdaHandler:
             logger.info(f"Processing trigger for task table ID: {task_table_id}")
 
             task_service.trigger_tables(
-                task_schedule_id=task_schedule_id, 
-                task_table_id=task_table_id, 
+                task_schedule_id=task_schedule_id,
+                task_table_id=task_table_id,
                 dependency_execution_id=dependency_execution_id
             )
 
@@ -351,8 +423,8 @@ class LambdaHandler:
         @self.inject_dependencies
         @self.transactional
         def trigger_process(
-            task_service: TaskService, 
-            logger: Logger, 
+            task_service: TaskService,
+            logger: Logger,
             session_provider: SessionProvider
         ):
             body = self.app.current_event.json_body
@@ -369,15 +441,19 @@ class LambdaHandler:
 
             task_service.run(payload)
 
-            logger.info(f"Event processed successfully.")
+            logger.info("Event processed successfully.")
             return {"message": "Task processed successfully."}
-        
+
+    def define_task_executor_routes(self):
+        """
+        Define as rotas relacionadas a task executors.
+        """
         @self.app.post("/task_executor")
         @self.inject_dependencies
         @self.transactional
-        def task_executor(
-            task_executor_service: TaskExecutorService, 
-            logger: Logger, 
+        def create_task_executor(
+            task_executor_service: TaskExecutorService,
+            logger: Logger,
             session_provider: SessionProvider
         ):
             body = self.app.current_event.json_body
@@ -388,21 +464,31 @@ class LambdaHandler:
 
             task_executor_service.save(payload)
 
-            logger.info(f"Event processed successfully.")
-            return {"message": "Task processed successfully."}
-        
-        @self.app.delete("/task_executor/{task_executor_id}", summary="Excluir uma tarefa por ID", tags=["Task Executor"])
+            logger.info("Event processed successfully.")
+            return {"message": "Task executor created successfully."}
+
+        @self.app.delete("/task_executor/<task_executor_id>", summary="Excluir uma tarefa por ID", tags=["Task Executor"])
         @self.inject_dependencies
         @self.transactional
-        def task_executor(
+        def delete_task_executor(
             task_executor_id: int,
             task_executor_service: TaskExecutorService,
             logger: Logger,
             session_provider: SessionProvider
         ):
             if not task_executor_id:
-                raise BadRequestError("Task ID is required")
+                raise BadRequestError("Task Executor ID is required")
             task_executor_service.delete(task_executor_id)
 
-            logger.info(f"Event processed successfully.")
-            return {"message": "Task processed successfully."}
+            logger.info("Event processed successfully.")
+            return {"message": "Task executor deleted successfully."}
+
+    def define_health_route(self):
+        """
+        Define a rota de health check.
+        """
+        @self.app.get("/health")
+        @self.inject_dependencies
+        def health_check(logger: Logger):
+            logger.info("Health check route accessed")
+            return {"status": "OK"}

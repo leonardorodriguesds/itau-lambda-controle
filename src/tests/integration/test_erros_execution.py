@@ -138,7 +138,7 @@ def test_should_raise_exception_when_try_to_create_table_with_cyclic_dependency(
     """
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {

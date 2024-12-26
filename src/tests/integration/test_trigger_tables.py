@@ -5,6 +5,8 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from src.app.config.constants import STATIC_APPROVE_STATUS_PENDING
+from src.app.models.approval_status import ApprovalStatus
 from src.app.models.base import Base  
 from lambda_function import lambda_handler
 from src.app.config.config import AppModule
@@ -76,12 +78,12 @@ def test_injector(db_session, mock_boto_service):
 
 def test_should_only_trigger_task_when_all_required_partitions_are_ready(test_injector):
     """
-    Exemplo de teste para a rota /add_table,
+    Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
     """
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {
@@ -247,12 +249,12 @@ def test_should_only_trigger_task_when_all_required_partitions_are_ready(test_in
 
 def test_should_only_trigger_task_when_all_required_partitions_are_ready_with_optional_partitions(test_injector):
     """
-    Exemplo de teste para a rota /add_table,
+    Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
     """
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {
@@ -466,12 +468,12 @@ def test_should_only_trigger_task_when_all_required_partitions_are_ready_with_op
 )
 def test_should_trigger_last_execution_process_when_call_run_without_payload(test_injector, params):
     """
-    Exemplo de teste para a rota /add_table,
+    Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
     """
     event = {
         "httpMethod": "POST",
-        "path": "/add_table",
+        "path": "/tables",
         "body": json.dumps({
             "data": [
                 {
@@ -809,3 +811,209 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
         assert json.loads(exec_info["input"]) == new_expected_input, (
             f"Input incorreto. Esperava={new_expected_input}, obteve={json.loads(exec_info['input'])}"
         )
+        
+def test_when_reject_execute_table_should_not_trigger_execution(test_injector):
+    event = {
+        "httpMethod": "POST",
+        "path": "/tables",
+        "body": json.dumps({
+            "data": [
+                {
+                    "name": "tbjf001_op_pdz_prep",
+                    "description": "Tabela de operações preparadas do PDZ",
+                    "requires_approval": False,
+                    "partitions": [
+                        {
+                            "name": "ano_mes_referencia",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        },
+                        {
+                            "name": "versao_processamento",
+                            "type": "int",
+                            "is_required": True
+                        },
+                        {
+                            "name": "identificador_empresa",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        }
+                    ],
+                    "dependencies": [],
+                    "tasks": []
+                },
+                {
+                    "name": "tbjf002_op_plz_prep",
+                    "description": "Tabela de operações preparadas do PLZ",
+                    "requires_approval": False,
+                    "partitions": [
+                        {
+                            "name": "ano_mes_referencia",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        },
+                        {
+                            "name": "versao_processamento",
+                            "type": "int",
+                            "is_required": True
+                        },
+                        {
+                            "name": "identificador_empresa",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        }
+                    ],
+                    "dependencies": [],
+                    "tasks": []
+                },
+                {
+                    "name": "tb_op_enriquecido",
+                    "description": "Tabela de operações preparadas do PLZ",
+                    "requires_approval": True,
+                    "partitions": [
+                        {
+                            "name": "ano_mes_referencia",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        },
+                        {
+                            "name": "versao_processamento",
+                            "type": "int",
+                            "is_required": True
+                        },
+                        {
+                            "name": "identificador_empresa",
+                            "type": "int",
+                            "is_required": True,
+                            "sync_column": True
+                        }
+                    ],
+                    "dependencies": [
+                        {
+                            "dependency_name": "tbjf001_op_pdz_prep",
+                            "is_required": True
+                        },
+                        {
+                            "dependency_name": "tbjf002_op_plz_prep",
+                            "is_required": True
+                        }
+                    ],
+                    "tasks": [
+                        {
+                            "task_executor": "step_function_executor",
+                            "alias": "op_enriquecido_step_function_executor",
+                            "params": {
+                                "table_name": "{{table.name}}",
+                                "table_description": "{{table.description}}",
+                                "partitions": {
+                                    "ano_mes_referencia": "{{partitions.ano_mes_referencia}}",
+                                    "identificador_empresa": "{{partitions.identificador_empresa}}"
+                                }
+                            },
+                            "debounce_seconds": 30
+                        }
+                    ]
+                }
+            ],
+            "user": "lrcxpnu"
+        })
+    }
+    
+    session_provider = test_injector.get(SessionProvider)
+    session = session_provider.get_session()
+
+    from src.app.models.task_executor import TaskExecutor
+    session.add(TaskExecutor(alias="step_function_executor", method="stepfunction_process", identification="arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine"))
+    
+    response = lambda_handler(
+        event=event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+
+    assert response["statusCode"] == 200
+    
+    tables = session.query(Tables).all()
+    
+    assert len(tables) == 3
+    
+    register_event = {
+        "httpMethod": "POST",
+        "path": "/register_execution",
+        "body": json.dumps({
+            "data": [
+                {
+                    "table_name": "tbjf001_op_pdz_prep",
+                    "partitions": [
+                        {"partition_name": "ano_mes_referencia", "value": "2405"},
+                        {"partition_name": "versao_processamento", "value": "1"},
+                        {"partition_name": "identificador_empresa", "value": "0"}
+                    ],
+                    "source": "glue"
+                },
+                {
+                    "table_name": "tbjf002_op_plz_prep",
+                    "partitions": [
+                        {"partition_name": "ano_mes_referencia", "value": "2405"},
+                        {"partition_name": "versao_processamento", "value": "1"},
+                        {"partition_name": "identificador_empresa", "value": "0"}
+                    ],
+                    "source": "glue"
+                }
+            ],
+            "user": "lrcxpnu"
+        })
+    }
+
+    mock_boto_service = test_injector.get(BotoService)
+    mock_scheduler_client = mock_boto_service.get_client('scheduler')
+
+    register_response = lambda_handler(
+        event=register_event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+    
+    assert register_response["statusCode"] == 200
+
+    from src.app.models.table_partition_exec import TablePartitionExec
+    all_execs = session.query(TablePartitionExec).all()
+    assert len(all_execs) == (1 * 3) + (1 * 3), f"Esperava {(1 * 3) + (1 * 3)} execuções, mas encontrou {len(all_execs)}"
+    
+    from src.app.models.task_schedule import TaskSchedule
+    all_schedules = session.query(TaskSchedule).all()
+    
+    assert len(all_schedules) == 1, f"Esperava 1 agendamentos antes da aprovação, mas encontrou {len(all_schedules)}"
+    
+    approval_status = session.query(ApprovalStatus).filter_by(status=STATIC_APPROVE_STATUS_PENDING).first()
+        
+    assert approval_status is not None, "Status de aprovação não encontrado"
+    
+    approval_event = {
+        "httpMethod": "POST",
+        "path": "/reject",
+        "body": json.dumps({
+            "approval_status_id": approval_status.id,
+            "user": "lrcxpnu"
+        })
+    }
+    
+    register_response = lambda_handler(
+        event=approval_event,
+        context=None,
+        injected_injector=test_injector,
+        debug=True
+    )
+
+    assert register_response["statusCode"] == 200
+    
+    all_schedules = session.query(TaskSchedule).all()
+    assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
+    assert len(mock_scheduler_client._schedules) == 0, f"Esperava 0 agendamento, mas encontrou {len(mock_scheduler_client._schedules)}"

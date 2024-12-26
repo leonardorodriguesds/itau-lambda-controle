@@ -33,6 +33,10 @@ class TableService:
         self.table_execution_service = table_execution_service
         self.task_table_service = task_table_service
         
+    def query(self, **filters):
+        self.logger.debug(f"[{self.__class__.__name__}] Querying tables with filters: [{filters}]")
+        return self.table_repository.query(**filters)
+        
     def find(self, table_id: Optional[str] = None, table_name: Optional[str] = None):
         self.logger.debug(f"[{self.__class__.__name__}] Finding table: [{table_id}] [{table_name}]")
         if table_id:
@@ -62,7 +66,6 @@ class TableService:
             table.last_modified_by = user
             table.last_modified_at = datetime.now()
             table.requires_approval = table_dto.requires_approval
-            self.table_repository.update(table)
         else:
             table = Tables(
                 name=table_dto.name,
@@ -71,9 +74,9 @@ class TableService:
                 created_at=datetime.now(),
                 requires_approval=table_dto.requires_approval
             )
-            self.table_repository.save(table)
-            
-            self.table_repository.session.flush()  
+        
+        self.table_repository.save(table)            
+        self.table_repository.session.flush()  
 
         self.logger.debug(f"[{self.__class__.__name__}] Table ID after flush: {table.id}")
 
@@ -95,3 +98,8 @@ class TableService:
     def find_by_dependency(self, table_id: int):
         self.logger.debug(f"[{self.__class__.__name__}] Finding tables by dependency: [{table_id}]")
         return self.table_repository.get_by_dependecy(table_id)
+    
+    def delete(self, table_id: int):
+        self.logger.debug(f"[{self.__class__.__name__}] Deleting table: [{table_id}]")
+        self.table_repository.soft_delete(table_id)
+        return f"Table ['{table_id}'] deleted successfully."
