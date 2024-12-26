@@ -1,7 +1,6 @@
 import pytest
 from unittest.mock import MagicMock
 
-from src.app.exceptions.not_found_exception import NotFoundException
 from src.app.exceptions.table_insert_error import TableInsertError
 from src.app.models.dto.table_dto import TableDTO
 from src.app.models.tables import Tables
@@ -58,7 +57,7 @@ def test_save_existing_table(table_service):
     response = table_service.save_table(table_dto, "user1")
     
     assert "Updated Table" in response
-    table_service.table_repository.update.assert_called_once()
+    table_service.table_repository.save.assert_called_once()
 
 
 def test_save_new_table(table_service):

@@ -4,7 +4,7 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from lambda_function import lambda_handler
+from src.lambda_function import lambda_handler
 from src.app.models.base import Base  
 from src.app.config.config import AppModule
 from src.app.models.dto.task_executor_dto import TaskExecutorDTO

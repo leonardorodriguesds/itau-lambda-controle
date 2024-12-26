@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from src.app.config.constants import STATIC_APPROVE_STATUS_PENDING
 from src.app.models.approval_status import ApprovalStatus
 from src.app.models.base import Base  
-from lambda_function import lambda_handler
+from src.lambda_function import lambda_handler
 from src.app.config.config import AppModule
 from src.app.models.table_execution import TableExecution
 from src.app.models.tables import Tables
