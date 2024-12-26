@@ -2,11 +2,11 @@ from unittest import mock
 import pytest
 from unittest.mock import MagicMock, create_autospec
 from datetime import datetime
-from src.app.service.task_service import TaskService
-from src.app.models.tables import Tables
-from src.app.models.task_table import TaskTable
-from src.app.models.table_execution import TableExecution
-from src.app.models.task_schedule import TaskSchedule
+from src.itaufluxcontrol.service.task_service import TaskService
+from src.itaufluxcontrol.models.tables import Tables
+from src.itaufluxcontrol.models.task_table import TaskTable
+from src.itaufluxcontrol.models.table_execution import TableExecution
+from src.itaufluxcontrol.models.task_schedule import TaskSchedule
 
 @pytest.fixture
 def task_service():

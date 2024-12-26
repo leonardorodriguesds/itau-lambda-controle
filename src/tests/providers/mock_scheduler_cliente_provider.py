@@ -188,7 +188,7 @@ class MockRequestsClient:
 
 
 
-from src.app.service.boto_service import BotoService
+from src.itaufluxcontrol.service.boto_service import BotoService
 
 class MockBotoService(BotoService):
     """

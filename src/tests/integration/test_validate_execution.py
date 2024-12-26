@@ -5,15 +5,15 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.app.config.constants import STATIC_APPROVE_STATUS_APPROVED, STATIC_APPROVE_STATUS_PENDING, STATIC_SCHEDULE_COMPLETED
-from src.app.models.approval_status import ApprovalStatus
-from src.app.models.base import Base  
-from src.lambda_function import lambda_handler
-from src.app.config.config import AppModule
-from src.app.models.table_execution import TableExecution
-from src.app.models.task_executor import TaskExecutor
-from src.app.provider.session_provider import SessionProvider
-from src.app.service.boto_service import BotoService
+from src.itaufluxcontrol.config.constants import STATIC_APPROVE_STATUS_APPROVED, STATIC_APPROVE_STATUS_PENDING, STATIC_SCHEDULE_COMPLETED
+from src.itaufluxcontrol.itaufluxcontrol import ItauFluxControl
+from src.itaufluxcontrol.models.approval_status import ApprovalStatus
+from src.itaufluxcontrol.models.base import Base  
+from src.itaufluxcontrol.config.config import AppModule
+from src.itaufluxcontrol.models.table_execution import TableExecution
+from src.itaufluxcontrol.models.task_executor import TaskExecutor
+from src.itaufluxcontrol.provider.session_provider import SessionProvider
+from src.itaufluxcontrol.service.boto_service import BotoService
 from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService, MockEventsClient, MockGlueClient, MockLambdaClient, MockRequestsClient, MockSQSClient, MockSchedulerClient, MockStepFunctionClient
 from src.tests.providers.mock_session_provider import TestSessionProvider
 
@@ -75,8 +75,19 @@ def test_injector(db_session, mock_boto_service):
 
     return Injector([TestModule()])
 
+@pytest.fixture
+def itaufluxcontrol(test_injector):
+    """
+    Fixture que devolve uma instância de AppModule
+    """
+    from aws_lambda_powertools.event_handler import ApiGatewayResolver
+    app_resolver = ApiGatewayResolver()
+    return ItauFluxControl(
+        injector=test_injector,
+        app_resolver=app_resolver,
+    )
 
-def test_add_table_route(test_injector):
+def test_add_table_route(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
@@ -99,19 +110,14 @@ def test_add_table_route(test_injector):
         })
     }
 
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
     
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.tables import Tables 
+    from src.itaufluxcontrol.models.tables import Tables 
 
     saved_table = session.query(Tables).filter_by(name='tbjf001_op_pdz_prep').first()
 
@@ -119,7 +125,7 @@ def test_add_table_route(test_injector):
     assert saved_table.description == "Tabela teste"
     assert saved_table.requires_approval is False
     
-def test_add_table_route_with_partitions(test_injector):
+def test_add_table_route_with_partitions(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
@@ -147,19 +153,14 @@ def test_add_table_route_with_partitions(test_injector):
         })
     }
 
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
     
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.tables import Tables 
+    from src.itaufluxcontrol.models.tables import Tables 
 
     saved_table = session.query(Tables).filter_by(name='tbjf001_op_pdz_prep').first()
 
@@ -167,12 +168,12 @@ def test_add_table_route_with_partitions(test_injector):
     assert saved_table.description == "Tabela teste"
     assert saved_table.requires_approval is False
     
-    from src.app.models.partitions import Partitions
+    from src.itaufluxcontrol.models.partitions import Partitions
     saved_partition = session.query(Partitions).filter_by(name='dt').first()
     assert saved_partition is not None
     assert saved_partition.type == "date"
     
-def test_add_table_route_with_partitions_and_tasks(test_injector):
+def test_add_table_route_with_partitions_and_tasks(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
@@ -215,16 +216,11 @@ def test_add_table_route_with_partitions_and_tasks(test_injector):
     
     session.add(TaskExecutor(alias="step_function_executor", method="step_function"))
 
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
 
-    from src.app.models.tables import Tables 
+    from src.itaufluxcontrol.models.tables import Tables 
 
     saved_table = session.query(Tables).filter_by(name='tbjf001_op_pdz_prep').first()
 
@@ -232,19 +228,19 @@ def test_add_table_route_with_partitions_and_tasks(test_injector):
     assert saved_table.description == "Tabela teste"
     assert saved_table.requires_approval is False
     
-    from src.app.models.partitions import Partitions
+    from src.itaufluxcontrol.models.partitions import Partitions
     saved_partition = session.query(Partitions).filter_by(name='dt').first()
     assert saved_partition is not None
     assert saved_partition.type == "date"
     
-    from src.app.models.task_table import TaskTable
+    from src.itaufluxcontrol.models.task_table import TaskTable
     saved_task = session.query(TaskTable).filter_by(alias='op_enriquecido_step_function_executor').first()
     
     assert saved_task is not None
     assert saved_task.task_executor.alias == "step_function_executor"
     assert saved_task.debounce_seconds == 30
     
-def test_add_table_route_with_dependencies(test_injector):
+def test_add_table_route_with_dependencies(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
@@ -374,18 +370,13 @@ def test_add_table_route_with_dependencies(test_injector):
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
 
-    from src.app.models.tables import Tables
-    from src.app.models.partitions import Partitions
-    from src.app.models.dependencies import Dependencies
+    from src.itaufluxcontrol.models.tables import Tables
+    from src.itaufluxcontrol.models.partitions import Partitions
+    from src.itaufluxcontrol.models.dependencies import Dependencies
 
     all_tables = session.query(Tables).all()
     assert len(all_tables) == 4, f"Esperava 4 tabelas, mas obteve {len(all_tables)}"
@@ -437,7 +428,7 @@ def test_add_table_route_with_dependencies(test_injector):
             f"{expected_deps[dep.dependency_table.name]}"
         )
 
-def test_add_table_and_register_executions(test_injector):
+def test_add_table_and_register_executions(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     1) Cria múltiplas tabelas (rota /tables).
     2) Verifica se foram salvas corretamente.
@@ -579,22 +570,17 @@ def test_add_table_and_register_executions(test_injector):
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.task_executor import TaskExecutor
+    from src.itaufluxcontrol.models.task_executor import TaskExecutor
     session.add(TaskExecutor(alias="step_function_executor", method="step_function"))
 
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
 
-    from src.app.models.tables import Tables
-    from src.app.models.partitions import Partitions
-    from src.app.models.dependencies import Dependencies
-    from src.app.models.task_table import TaskTable
+    from src.itaufluxcontrol.models.tables import Tables
+    from src.itaufluxcontrol.models.partitions import Partitions
+    from src.itaufluxcontrol.models.dependencies import Dependencies
+    from src.itaufluxcontrol.models.task_table import TaskTable
 
     all_tables = session.query(Tables).all()
     assert len(all_tables) == 4, f"Esperava 4 tabelas, mas encontrou {len(all_tables)}"
@@ -678,38 +664,28 @@ def test_add_table_and_register_executions(test_injector):
     mock_boto_service = test_injector.get(BotoService)
     mock_scheduler_client = mock_boto_service.get_client('scheduler')
 
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
 
     assert register_response["statusCode"] == 200
 
-    from src.app.models.table_partition_exec import TablePartitionExec
+    from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == (1 * 3) + (1 * 3) + (1 * 3) + (1 * 2), f"Esperava {(1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)} execuções, mas encontrou {len(all_execs)}"
 
-    from src.app.models.task_schedule import TaskSchedule
+    from src.itaufluxcontrol.models.task_schedule import TaskSchedule
     all_schedules = session.query(TaskSchedule).all()
     
     assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
     
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
 
     assert register_response["statusCode"] == 200
 
-    from src.app.models.table_partition_exec import TablePartitionExec
+    from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == ((1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)) * 2, f"Esperava {((1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)) * 2} execuções, mas encontrou {len(all_execs)}"
 
-    from src.app.models.task_schedule import TaskSchedule
+    from src.itaufluxcontrol.models.task_schedule import TaskSchedule
     all_schedules = session.query(TaskSchedule).all()
     
     assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
@@ -734,6 +710,7 @@ def test_add_table_and_register_executions(test_injector):
 def test_add_table_and_register_executions_and_trigger_process(
     test_injector, 
     mock_boto_service,
+    itaufluxcontrol: ItauFluxControl,
     executor_method,
     identification,
     requires_approval
@@ -872,25 +849,20 @@ def test_add_table_and_register_executions_and_trigger_process(
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.task_executor import TaskExecutor
+    from src.itaufluxcontrol.models.task_executor import TaskExecutor
     
     task_execution = TaskExecutor(alias="mock_executor", method=executor_method, identification=identification)
     
     session.add(task_execution)
 
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
 
-    from src.app.models.tables import Tables
-    from src.app.models.partitions import Partitions
-    from src.app.models.dependencies import Dependencies
-    from src.app.models.task_table import TaskTable
+    from src.itaufluxcontrol.models.tables import Tables
+    from src.itaufluxcontrol.models.partitions import Partitions
+    from src.itaufluxcontrol.models.dependencies import Dependencies
+    from src.itaufluxcontrol.models.task_table import TaskTable
 
     all_tables = session.query(Tables).all()
     assert len(all_tables) == 4, f"Esperava 4 tabelas, mas encontrou {len(all_tables)}"
@@ -972,26 +944,16 @@ def test_add_table_and_register_executions_and_trigger_process(
 
     mock_scheduler_client = mock_boto_service.get_client('scheduler')
 
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
 
     assert register_response["statusCode"] == 200
 
-    from src.app.models.table_partition_exec import TablePartitionExec
+    from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == (1 * 3) + (1 * 3) + (1 * 3) + (1 * 2), f"Esperava {(1 * 3) + (1 * 3) + (1 * 3) + (1 * 2)} execuções, mas encontrou {len(all_execs)}"
 
     # chama novamente para validar que só cria 1 schedule
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
 
     assert register_response["statusCode"] == 200
 
@@ -1012,12 +974,7 @@ def test_add_table_and_register_executions_and_trigger_process(
             })
         }
         
-        register_response = lambda_handler(
-            event=approval_event,
-            context=None,
-            injected_injector=test_injector,
-            debug=True
-        )
+        register_response = itaufluxcontrol.process_event(approval_event, None)
 
         assert register_response["statusCode"] == 200
         
@@ -1025,7 +982,7 @@ def test_add_table_and_register_executions_and_trigger_process(
         assert approval_status_approved is not None
         assert approval_status_approved.id == approval_status.id
         
-    from src.app.models.task_schedule import TaskSchedule
+    from src.itaufluxcontrol.models.task_schedule import TaskSchedule
     all_schedules = session.query(TaskSchedule).all()
     task_schedule = all_schedules[0]
     assert len(all_schedules) == 1, f"Esperava 1 agendamento, mas encontrou {len(all_schedules)}"
@@ -1080,12 +1037,7 @@ def test_add_table_and_register_executions_and_trigger_process(
     
     trigger_event["body"] = json.dumps(trigger_event["body"])
     
-    trigger_response = lambda_handler(
-        event=trigger_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    trigger_response = itaufluxcontrol.process_event(trigger_event, None)
     
     assert trigger_response["statusCode"] == 200
     
@@ -1212,12 +1164,7 @@ def test_add_table_and_register_executions_and_trigger_process(
     mock_boto_service = test_injector.get(BotoService)
     mock_scheduler_client = mock_boto_service.get_client('scheduler')
 
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
     
     assert register_response["statusCode"] == 200
     

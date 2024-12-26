@@ -2,12 +2,12 @@ from datetime import datetime
 import pytest
 from botocore.exceptions import ClientError
 from unittest.mock import MagicMock, PropertyMock
-from src.app.models.table_execution import TableExecution
-from src.app.models.tables import Tables
-from src.app.models.task_executor import TaskExecutor
-from src.app.models.task_schedule import TaskSchedule
-from src.app.models.task_table import TaskTable
-from src.app.service.event_bridge_scheduler_service import EventBridgeSchedulerService
+from src.itaufluxcontrol.models.table_execution import TableExecution
+from src.itaufluxcontrol.models.tables import Tables
+from src.itaufluxcontrol.models.task_executor import TaskExecutor
+from src.itaufluxcontrol.models.task_schedule import TaskSchedule
+from src.itaufluxcontrol.models.task_table import TaskTable
+from src.itaufluxcontrol.service.event_bridge_scheduler_service import EventBridgeSchedulerService
 import json
 
 @pytest.fixture

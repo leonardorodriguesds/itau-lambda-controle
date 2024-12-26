@@ -5,15 +5,15 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.app.config.constants import STATIC_APPROVE_STATUS_PENDING
-from src.app.models.approval_status import ApprovalStatus
-from src.app.models.base import Base  
-from src.lambda_function import lambda_handler
-from src.app.config.config import AppModule
-from src.app.models.table_execution import TableExecution
-from src.app.models.tables import Tables
-from src.app.provider.session_provider import SessionProvider
-from src.app.service.boto_service import BotoService
+from src.itaufluxcontrol.config.constants import STATIC_APPROVE_STATUS_PENDING
+from src.itaufluxcontrol.itaufluxcontrol import ItauFluxControl
+from src.itaufluxcontrol.models.approval_status import ApprovalStatus
+from src.itaufluxcontrol.models.base import Base  
+from src.itaufluxcontrol.config.config import AppModule
+from src.itaufluxcontrol.models.table_execution import TableExecution
+from src.itaufluxcontrol.models.tables import Tables
+from src.itaufluxcontrol.provider.session_provider import SessionProvider
+from src.itaufluxcontrol.service.boto_service import BotoService
 from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService, MockEventsClient, MockGlueClient, MockLambdaClient, MockRequestsClient, MockSQSClient, MockSchedulerClient, MockStepFunctionClient
 from src.tests.providers.mock_session_provider import TestSessionProvider
 
@@ -60,7 +60,6 @@ def db_session():
     session.close()
     Base.metadata.drop_all(engine)
 
-
 @pytest.fixture
 def test_injector(db_session, mock_boto_service):
     """
@@ -75,8 +74,19 @@ def test_injector(db_session, mock_boto_service):
 
     return Injector([TestModule()])
 
+@pytest.fixture
+def itaufluxcontrol(test_injector):
+    """
+    Fixture que devolve uma instância de AppModule
+    """
+    from aws_lambda_powertools.event_handler import ApiGatewayResolver
+    app_resolver = ApiGatewayResolver()
+    return ItauFluxControl(
+        injector=test_injector,
+        app_resolver=app_resolver,
+    )
 
-def test_should_only_trigger_task_when_all_required_partitions_are_ready(test_injector):
+def test_should_only_trigger_task_when_all_required_partitions_are_ready(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
@@ -191,15 +201,10 @@ def test_should_only_trigger_task_when_all_required_partitions_are_ready(test_in
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.task_executor import TaskExecutor
+    from src.itaufluxcontrol.models.task_executor import TaskExecutor
     session.add(TaskExecutor(alias="step_function_executor", method="step_function"))
     
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
     
@@ -229,25 +234,20 @@ def test_should_only_trigger_task_when_all_required_partitions_are_ready(test_in
     mock_boto_service = test_injector.get(BotoService)
     mock_scheduler_client = mock_boto_service.get_client('scheduler')
 
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
     
     assert register_response["statusCode"] == 200
 
-    from src.app.models.table_partition_exec import TablePartitionExec
+    from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == (1 * 3), f"Esperava {(1 * 3)} execuções, mas encontrou {len(all_execs)}"
 
-    from src.app.models.task_schedule import TaskSchedule
+    from src.itaufluxcontrol.models.task_schedule import TaskSchedule
     all_schedules = session.query(TaskSchedule).all()
     
     assert len(all_schedules) == 0, f"Esperava 0 agendamentos, mas encontrou {len(all_schedules)}"
 
-def test_should_only_trigger_task_when_all_required_partitions_are_ready_with_optional_partitions(test_injector):
+def test_should_only_trigger_task_when_all_required_partitions_are_ready_with_optional_partitions(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
@@ -386,15 +386,10 @@ def test_should_only_trigger_task_when_all_required_partitions_are_ready_with_op
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.task_executor import TaskExecutor
+    from src.itaufluxcontrol.models.task_executor import TaskExecutor
     session.add(TaskExecutor(alias="step_function_executor", method="step_function"))
     
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
     
@@ -433,20 +428,15 @@ def test_should_only_trigger_task_when_all_required_partitions_are_ready_with_op
     mock_boto_service = test_injector.get(BotoService)
     mock_scheduler_client = mock_boto_service.get_client('scheduler')
 
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
     
     assert register_response["statusCode"] == 200
 
-    from src.app.models.table_partition_exec import TablePartitionExec
+    from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == (1 * 3) + (1 * 3), f"Esperava {(1 * 3) + (1 * 3)} execuções, mas encontrou {len(all_execs)}"
 
-    from src.app.models.task_schedule import TaskSchedule
+    from src.itaufluxcontrol.models.task_schedule import TaskSchedule
     all_schedules = session.query(TaskSchedule).all()
     
     assert len(all_schedules) == 1, f"Esperava 1 agendamentos, mas encontrou {len(all_schedules)}"
@@ -466,7 +456,7 @@ def test_should_only_trigger_task_when_all_required_partitions_are_ready_with_op
         })
     ],
 )
-def test_should_trigger_last_execution_process_when_call_run_without_payload(test_injector, params):
+def test_should_trigger_last_execution_process_when_call_run_without_payload(test_injector, itaufluxcontrol: ItauFluxControl, params):
     """
     Exemplo de teste para a rota /tables,
     usando uma sessão SQLite in-memory.
@@ -609,15 +599,10 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.task_executor import TaskExecutor
+    from src.itaufluxcontrol.models.task_executor import TaskExecutor
     session.add(TaskExecutor(alias="step_function_executor", method="stepfunction_process", identification="arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine"))
     
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
     
@@ -656,20 +641,15 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
     mock_boto_service = test_injector.get(BotoService)
     mock_scheduler_client = mock_boto_service.get_client('scheduler')
 
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
     
     assert register_response["statusCode"] == 200
 
-    from src.app.models.table_partition_exec import TablePartitionExec
+    from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == (1 * 3) + (1 * 3), f"Esperava {(1 * 3) + (1 * 3)} execuções, mas encontrou {len(all_execs)}"
 
-    from src.app.models.task_schedule import TaskSchedule
+    from src.itaufluxcontrol.models.task_schedule import TaskSchedule
     all_schedules = session.query(TaskSchedule).all()
     
     assert len(all_schedules) == 1, f"Esperava 1 agendamentos, mas encontrou {len(all_schedules)}"
@@ -679,12 +659,7 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
     
     trigger_event["body"] = json.dumps(trigger_event["body"])
     
-    trigger_response = lambda_handler(
-        event=trigger_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    trigger_response = itaufluxcontrol.process_event(trigger_event, None)
     
     assert trigger_response["statusCode"] == 200
     
@@ -742,16 +717,11 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
     mock_boto_service = test_injector.get(BotoService)
     mock_scheduler_client = mock_boto_service.get_client('scheduler')
 
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
     
     assert register_response["statusCode"] == 200
     
-    from src.app.models.table_partition_exec import TablePartitionExec
+    from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == (1 * 3) + (1 * 3) + (1 * 3), f"Esperava {(1 * 3) + (1 * 3) + (1 * 3)} execuções, mas encontrou {len(all_execs)}"
     
@@ -772,12 +742,7 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
         })
     }
     
-    run_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    run_response = itaufluxcontrol.process_event(register_event, None)
     
     assert run_response["statusCode"] == 200
     
@@ -812,7 +777,7 @@ def test_should_trigger_last_execution_process_when_call_run_without_payload(tes
             f"Input incorreto. Esperava={new_expected_input}, obteve={json.loads(exec_info['input'])}"
         )
         
-def test_when_reject_execute_table_should_not_trigger_execution(test_injector):
+def test_when_reject_execute_table_should_not_trigger_execution(test_injector, itaufluxcontrol: ItauFluxControl):
     event = {
         "httpMethod": "POST",
         "path": "/tables",
@@ -927,15 +892,10 @@ def test_when_reject_execute_table_should_not_trigger_execution(test_injector):
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.task_executor import TaskExecutor
+    from src.itaufluxcontrol.models.task_executor import TaskExecutor
     session.add(TaskExecutor(alias="step_function_executor", method="stepfunction_process", identification="arn:aws:states:us-east-1:123456789012:stateMachine:my-state-machine"))
     
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
     
@@ -974,20 +934,15 @@ def test_when_reject_execute_table_should_not_trigger_execution(test_injector):
     mock_boto_service = test_injector.get(BotoService)
     mock_scheduler_client = mock_boto_service.get_client('scheduler')
 
-    register_response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(register_event, None)
     
     assert register_response["statusCode"] == 200
 
-    from src.app.models.table_partition_exec import TablePartitionExec
+    from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
     all_execs = session.query(TablePartitionExec).all()
     assert len(all_execs) == (1 * 3) + (1 * 3), f"Esperava {(1 * 3) + (1 * 3)} execuções, mas encontrou {len(all_execs)}"
     
-    from src.app.models.task_schedule import TaskSchedule
+    from src.itaufluxcontrol.models.task_schedule import TaskSchedule
     all_schedules = session.query(TaskSchedule).all()
     
     assert len(all_schedules) == 1, f"Esperava 1 agendamentos antes da aprovação, mas encontrou {len(all_schedules)}"
@@ -1005,12 +960,7 @@ def test_when_reject_execute_table_should_not_trigger_execution(test_injector):
         })
     }
     
-    register_response = lambda_handler(
-        event=approval_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response = itaufluxcontrol.process_event(approval_event, None)
 
     assert register_response["statusCode"] == 200
     

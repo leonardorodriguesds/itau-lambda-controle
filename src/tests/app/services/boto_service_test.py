@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from boto3.session import Session as BotoSession
 
-from src.app.service.boto_service import BotoService
+from src.itaufluxcontrol.service.boto_service import BotoService
 
 
 @pytest.fixture

@@ -1,9 +1,9 @@
 from unittest import mock
 import pytest
 from unittest.mock import MagicMock
-from src.app.service.task_table_service import TaskTableService
-from src.app.models.dto.table_dto import TaskDTO
-from src.app.models.task_table import TaskTable
+from src.itaufluxcontrol.service.task_table_service import TaskTableService
+from src.itaufluxcontrol.models.dto.table_dto import TaskDTO
+from src.itaufluxcontrol.models.task_table import TaskTable
 
 @pytest.fixture
 def task_table_service():

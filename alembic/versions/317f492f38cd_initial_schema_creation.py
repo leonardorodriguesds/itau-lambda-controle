@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import mysql
 
-from src.app.config.constants import STATIC_SCHEDULE_PENDENT
+from src.itaufluxcontrol.config.constants import STATIC_SCHEDULE_PENDENT
 
 # revision identifiers, used by Alembic.
 revision: str = '317f492f38cd'

@@ -5,15 +5,15 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.app.config.constants import STATIC_APPROVE_STATUS_PENDING
-from src.app.models.approval_status import ApprovalStatus
-from src.app.models.base import Base  
-from src.lambda_function import lambda_handler
-from src.app.config.config import AppModule
-from src.app.models.table_execution import TableExecution
-from src.app.models.tables import Tables
-from src.app.provider.session_provider import SessionProvider
-from src.app.service.boto_service import BotoService
+from src.itaufluxcontrol.config.constants import STATIC_APPROVE_STATUS_PENDING
+from src.itaufluxcontrol.itaufluxcontrol import ItauFluxControl
+from src.itaufluxcontrol.models.approval_status import ApprovalStatus
+from src.itaufluxcontrol.models.base import Base  
+from src.itaufluxcontrol.config.config import AppModule
+from src.itaufluxcontrol.models.table_execution import TableExecution
+from src.itaufluxcontrol.models.tables import Tables
+from src.itaufluxcontrol.provider.session_provider import SessionProvider
+from src.itaufluxcontrol.service.boto_service import BotoService
 from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService, MockEventsClient, MockGlueClient, MockLambdaClient, MockRequestsClient, MockSQSClient, MockSchedulerClient, MockStepFunctionClient
 from src.tests.providers.mock_session_provider import TestSessionProvider
 
@@ -75,7 +75,19 @@ def test_injector(db_session, mock_boto_service):
 
     return Injector([TestModule()])
 
-def test_create_and_update_tables(test_injector):
+@pytest.fixture
+def itaufluxcontrol(test_injector):
+    """
+    Fixture que devolve uma instância de AppModule
+    """
+    from aws_lambda_powertools.event_handler import ApiGatewayResolver
+    app_resolver = ApiGatewayResolver()
+    return ItauFluxControl(
+        injector=test_injector,
+        app_resolver=app_resolver,
+    )
+
+def test_create_and_update_tables(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Testa a criação e atualização de tabelas.
     """
@@ -102,19 +114,14 @@ def test_create_and_update_tables(test_injector):
         })
     }
 
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200
     
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.tables import Tables 
+    from src.itaufluxcontrol.models.tables import Tables 
 
     saved_table = session.query(Tables).filter_by(name='tbjf001_op_pdz_prep').first()
 
@@ -155,12 +162,7 @@ def test_create_and_update_tables(test_injector):
         })
     }
     
-    response = lambda_handler(
-        event=update_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(update_event, None)
     
     assert response["statusCode"] == 200
     updated_table = session.query(Tables).filter_by(name='tbjf001_op_pdz_prep').first()
@@ -182,7 +184,7 @@ def test_create_and_update_tables(test_injector):
     ({"invalid_field": "value"}, None, True),  
     ({"name": "non_existing_table"}, {"count": 0}, False),
 ])
-def test_get_all_tables_or_get_specific_table(test_injector, filters, expected, expect_exception):
+def test_get_all_tables_or_get_specific_table(test_injector, filters, expected, expect_exception, itaufluxcontrol: ItauFluxControl):
     """
     Testa a obtenção de todas as tabelas ou uma tabela específica com base nos filtros.
     """
@@ -222,12 +224,7 @@ def test_get_all_tables_or_get_specific_table(test_injector, filters, expected, 
         })
     }
 
-    response = lambda_handler(
-        event=post_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(post_event, None)
 
     assert response["statusCode"] == 200, "Falha ao criar tabelas."
 
@@ -237,12 +234,7 @@ def test_get_all_tables_or_get_specific_table(test_injector, filters, expected, 
         "queryStringParameters": filters if filters else None
     }
 
-    response = lambda_handler(
-        event=get_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(get_event, None)
 
     if expect_exception:
         assert response["statusCode"] == 500
@@ -268,7 +260,7 @@ def test_get_all_tables_or_get_specific_table(test_injector, filters, expected, 
         if "id" in filters:
             assert data[0]["id"] == expected["id"], f"Esperado id '{expected['id']}', obtido '{data[0]['id']}'."
 
-def test_delete_table(test_injector):
+def test_delete_table(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Testa a exclusão de uma tabela.
     """
@@ -295,12 +287,7 @@ def test_delete_table(test_injector):
         })
     }
 
-    create_response = lambda_handler(
-        event=create_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    create_response = itaufluxcontrol.process_event(create_event, None)
 
     assert create_response["statusCode"] == 200, "Falha ao criar a tabela para exclusão."
 
@@ -320,12 +307,7 @@ def test_delete_table(test_injector):
         "body": None
     }
 
-    delete_response = lambda_handler(
-        event=delete_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    delete_response = itaufluxcontrol.process_event(delete_event, None)
 
     assert delete_response["statusCode"] == 200, "Falha ao excluir a tabela."
 
@@ -340,12 +322,7 @@ def test_delete_table(test_injector):
         "queryStringParameters": {"id": str(table_id)}
     }
 
-    get_response = lambda_handler(
-        event=get_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    get_response = itaufluxcontrol.process_event(get_event, None)
 
     assert get_response["statusCode"] == 200, "Falha ao obter tabelas após exclusão."
 

@@ -5,13 +5,13 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.app.models.base import Base  
-from src.lambda_function import lambda_handler
-from src.app.config.config import AppModule
-from src.app.models.table_execution import TableExecution
-from src.app.models.task_executor import TaskExecutor
-from src.app.provider.session_provider import SessionProvider
-from src.app.service.boto_service import BotoService
+from src.itaufluxcontrol.itaufluxcontrol import ItauFluxControl
+from src.itaufluxcontrol.models.base import Base  
+from src.itaufluxcontrol.config.config import AppModule
+from src.itaufluxcontrol.models.table_execution import TableExecution
+from src.itaufluxcontrol.models.task_executor import TaskExecutor
+from src.itaufluxcontrol.provider.session_provider import SessionProvider
+from src.itaufluxcontrol.service.boto_service import BotoService
 from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService, MockEventsClient, MockGlueClient, MockLambdaClient, MockRequestsClient, MockSQSClient, MockSchedulerClient, MockStepFunctionClient
 from src.tests.providers.mock_session_provider import TestSessionProvider
 
@@ -73,8 +73,19 @@ def test_injector(db_session, mock_boto_service):
 
     return Injector([TestModule()])
 
+@pytest.fixture
+def itaufluxcontrol(test_injector):
+    """
+    Fixture que devolve uma instância de AppModule
+    """
+    from aws_lambda_powertools.event_handler import ApiGatewayResolver
+    app_resolver = ApiGatewayResolver()
+    return ItauFluxControl(
+        injector=test_injector,
+        app_resolver=app_resolver,
+    )
 
-def test_lambda_handler_execution_not_found(test_injector):
+def test_lambda_handler_execution_not_found(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Testa o retorno de erro quando não encontra a execução
     """
@@ -96,11 +107,11 @@ def test_lambda_handler_execution_not_found(test_injector):
         })
     }
 
-    response = lambda_handler(event, None)
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 404
     
-def test_should_raise_exception_when_try_to_register_a_not_found_table(test_injector):
+def test_should_raise_exception_when_try_to_register_a_not_found_table(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Testa o retorno de erro quando não encontra a tabela
     """
@@ -123,16 +134,11 @@ def test_should_raise_exception_when_try_to_register_a_not_found_table(test_inje
         })
     }
 
-    response = lambda_handler(
-        event=register_event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(register_event, None)
 
     assert response["statusCode"] == 500
     
-def test_should_raise_exception_when_try_to_create_table_with_cyclic_dependency(test_injector):
+def test_should_raise_exception_when_try_to_create_table_with_cyclic_dependency(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Testa o retorno de erro quando não encontra a tabela
     """
@@ -185,11 +191,6 @@ def test_should_raise_exception_when_try_to_create_table_with_cyclic_dependency(
         })
     }
 
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 500

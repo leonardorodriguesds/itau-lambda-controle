@@ -1,9 +1,9 @@
 import pytest
 from unittest.mock import MagicMock
-from src.app.models.dependencies import Dependencies
-from src.app.models.dto.table_dto import DependencyDTO
-from src.app.exceptions.table_insert_error import TableInsertError
-from src.app.service.dependency_service import DependencyService
+from src.itaufluxcontrol.models.dependencies import Dependencies
+from src.itaufluxcontrol.models.dto.table_dto import DependencyDTO
+from src.itaufluxcontrol.exceptions.table_insert_error import TableInsertError
+from src.itaufluxcontrol.service.dependency_service import DependencyService
 
 
 @pytest.fixture

@@ -1,12 +1,12 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from aws_lambda_powertools.metrics import MetricUnit
-from src.app.service.cloud_watch_service import CloudWatchService 
+from src.itaufluxcontrol.service.cloud_watch_service import CloudWatchService 
 
 @pytest.fixture
 def cloudwatch_service():
     logger = MagicMock()
-    with patch("src.app.service.cloud_watch_service.Metrics") as mock_metrics:
+    with patch("src.itaufluxcontrol.service.cloud_watch_service.Metrics") as mock_metrics:
         metrics_instance = mock_metrics.return_value
         return CloudWatchService(logger), metrics_instance
 

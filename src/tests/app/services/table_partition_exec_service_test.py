@@ -1,12 +1,12 @@
 import pytest
 from unittest.mock import ANY, MagicMock, call, patch
 from datetime import datetime
-from src.app.service.table_partition_exec_service import TablePartitionExecService
-from src.app.models.table_partition_exec import TablePartitionExec
-from src.app.models.tables import Tables
-from src.app.models.table_execution import TableExecution
-from src.app.models.dto.table_partition_exec_dto import TablePartitionExecDTO, PartitionDTO
-from src.app.exceptions.table_insert_error import TableInsertError
+from src.itaufluxcontrol.service.table_partition_exec_service import TablePartitionExecService
+from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
+from src.itaufluxcontrol.models.tables import Tables
+from src.itaufluxcontrol.models.table_execution import TableExecution
+from src.itaufluxcontrol.models.dto.table_partition_exec_dto import TablePartitionExecDTO, PartitionDTO
+from src.itaufluxcontrol.exceptions.table_insert_error import TableInsertError
 
 @pytest.fixture
 def mock_services():

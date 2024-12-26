@@ -5,18 +5,18 @@ from injector import Injector, Binder, singleton
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.app.config.constants import STATIC_APPROVE_STATUS_PENDING
-from src.app.models.approval_status import ApprovalStatus
-from src.app.models.base import Base  
-from src.lambda_function import lambda_handler
-from src.app.config.config import AppModule
-from src.app.models.table_execution import TableExecution
-from src.app.models.table_partition_exec import TablePartitionExec
-from src.app.models.tables import Tables
-from src.app.models.task_executor import TaskExecutor
-from src.app.models.task_schedule import TaskSchedule
-from src.app.provider.session_provider import SessionProvider
-from src.app.service.boto_service import BotoService
+from src.itaufluxcontrol.config.constants import STATIC_APPROVE_STATUS_PENDING
+from src.itaufluxcontrol.itaufluxcontrol import ItauFluxControl
+from src.itaufluxcontrol.models.approval_status import ApprovalStatus
+from src.itaufluxcontrol.models.base import Base  
+from src.itaufluxcontrol.config.config import AppModule
+from src.itaufluxcontrol.models.table_execution import TableExecution
+from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
+from src.itaufluxcontrol.models.tables import Tables
+from src.itaufluxcontrol.models.task_executor import TaskExecutor
+from src.itaufluxcontrol.models.task_schedule import TaskSchedule
+from src.itaufluxcontrol.provider.session_provider import SessionProvider
+from src.itaufluxcontrol.service.boto_service import BotoService
 from src.tests.providers.mock_scheduler_cliente_provider import MockBotoService, MockEventsClient, MockGlueClient, MockLambdaClient, MockRequestsClient, MockSQSClient, MockSchedulerClient, MockStepFunctionClient
 from src.tests.providers.mock_session_provider import TestSessionProvider
 
@@ -78,7 +78,19 @@ def test_injector(db_session, mock_boto_service):
 
     return Injector([TestModule()])
 
-def test_e2e_central(test_injector):
+@pytest.fixture
+def itaufluxcontrol(test_injector):
+    """
+    Fixture que devolve uma instância de AppModule
+    """
+    from aws_lambda_powertools.event_handler import ApiGatewayResolver
+    app_resolver = ApiGatewayResolver()
+    return ItauFluxControl(
+        injector=test_injector,
+        app_resolver=app_resolver,
+    )
+
+def test_e2e_central(test_injector, itaufluxcontrol: ItauFluxControl):
     """
     Teste end-to-end para a rota /tables com dependências transitivas.
     Valida que as execuções são corretamente disparadas conforme as dependências.
@@ -227,22 +239,17 @@ def test_e2e_central(test_injector):
     session_provider = test_injector.get(SessionProvider)
     session = session_provider.get_session()
 
-    from src.app.models.task_executor import TaskExecutor
+    from src.itaufluxcontrol.models.task_executor import TaskExecutor
     session.add(TaskExecutor(alias="step_function_executor", method="step_function"))
     session.commit()
 
     # Chamada ao lambda_handler para criar as tabelas
-    response = lambda_handler(
-        event=event,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    response = itaufluxcontrol.process_event(event, None)
 
     assert response["statusCode"] == 200, f"Resposta inesperada: {response}"
 
     # Verificação das tabelas criadas
-    from src.app.models.tables import Tables
+    from src.itaufluxcontrol.models.tables import Tables
     tables = session.query(Tables).all()
     assert len(tables) == 4, f"Esperava 4 tabelas, mas encontrou {len(tables)}"
 
@@ -271,12 +278,7 @@ def test_e2e_central(test_injector):
     mock_scheduler_client = mock_boto_service.get_client('scheduler')
 
     # Chamada ao lambda_handler para registrar a execução da tabela A
-    register_response_a = lambda_handler(
-        event=register_event_a,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response_a = itaufluxcontrol.process_event(register_event_a, None)
 
     assert register_response_a["statusCode"] == 200, f"Resposta inesperada ao registrar tb_a: {register_response_a}"
 
@@ -301,12 +303,7 @@ def test_e2e_central(test_injector):
     }
 
     # Chamada ao lambda_handler para registrar a execução da tabela B
-    register_response_b = lambda_handler(
-        event=register_event_b,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response_b = itaufluxcontrol.process_event(register_event_b, None)
 
     assert register_response_b["statusCode"] == 200, f"Resposta inesperada ao registrar tb_b: {register_response_b}"
 
@@ -331,12 +328,7 @@ def test_e2e_central(test_injector):
     }
 
     # Chamada ao lambda_handler para registrar a execução da tabela C
-    register_response_c = lambda_handler(
-        event=register_event_c,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response_c = itaufluxcontrol.process_event(register_event_c, None)
 
     assert register_response_c["statusCode"] == 200, f"Resposta inesperada ao registrar tb_c: {register_response_c}"
 
@@ -361,23 +353,18 @@ def test_e2e_central(test_injector):
     }
 
     # Chamada ao lambda_handler para registrar a execução da tabela D
-    register_response_d = lambda_handler(
-        event=register_event_d,
-        context=None,
-        injected_injector=test_injector,
-        debug=True
-    )
+    register_response_d = itaufluxcontrol.process_event(register_event_d, None)
 
     assert register_response_d["statusCode"] == 200, f"Resposta inesperada ao registrar tb_d: {register_response_d}"
 
     # Verificação das execuções das partições
-    from src.app.models.table_partition_exec import TablePartitionExec
+    from src.itaufluxcontrol.models.table_partition_exec import TablePartitionExec
     all_execs = session.query(TablePartitionExec).all()
     # Espera 4 tabelas * 3 partições cada
     assert len(all_execs) == (4 * 3), f"Esperava {(4 * 3)} execuções, mas encontrou {len(all_execs)}"
 
     # Verificação dos agendamentos de tarefas
-    from src.app.models.task_schedule import TaskSchedule
+    from src.itaufluxcontrol.models.task_schedule import TaskSchedule
     all_schedules = session.query(TaskSchedule).all()
 
     # Considerando que as dependências transitivas foram atendidas, apenas a tabela D deve ter uma tarefa agendada

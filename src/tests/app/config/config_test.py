@@ -2,12 +2,12 @@ import logging
 import boto3
 import pytest
 from injector import Injector
-from src.app.config.config import AppModule
-from src.app.config.logger import logger
-from src.app.provider.session_provider import SessionProvider
-from src.app.service.table_service import TableService
-from src.app.service.table_partition_exec_service import TablePartitionExecService
-from src.app.service.event_bridge_scheduler_service import EventBridgeSchedulerService
+from src.itaufluxcontrol.config.config import AppModule
+from src.itaufluxcontrol.config.logger import logger
+from src.itaufluxcontrol.provider.session_provider import SessionProvider
+from src.itaufluxcontrol.service.table_service import TableService
+from src.itaufluxcontrol.service.table_partition_exec_service import TablePartitionExecService
+from src.itaufluxcontrol.service.event_bridge_scheduler_service import EventBridgeSchedulerService
 
 @pytest.fixture
 def injector():

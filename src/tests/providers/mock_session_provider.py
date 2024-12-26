@@ -1,4 +1,4 @@
-from src.app.provider.session_provider import SessionProvider
+from src.itaufluxcontrol.provider.session_provider import SessionProvider
 
 
 class TestSessionProvider(SessionProvider):

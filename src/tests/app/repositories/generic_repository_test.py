@@ -6,8 +6,8 @@ from sqlalchemy import Column, Integer, String, DateTime, create_engine
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 
-from src.app.models.base import Base 
-from src.app.repositories.generic_repository import GenericRepository
+from src.itaufluxcontrol.models.base import Base 
+from src.itaufluxcontrol.repositories.generic_repository import GenericRepository
 from aws_lambda_powertools.event_handler.exceptions import NotFoundError
 
 class User(Base):

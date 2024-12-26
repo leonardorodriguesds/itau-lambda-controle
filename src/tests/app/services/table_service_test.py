@@ -1,10 +1,10 @@
 import pytest
 from unittest.mock import MagicMock
 
-from src.app.exceptions.table_insert_error import TableInsertError
-from src.app.models.dto.table_dto import TableDTO
-from src.app.models.tables import Tables
-from src.app.service.table_service import TableService
+from src.itaufluxcontrol.exceptions.table_insert_error import TableInsertError
+from src.itaufluxcontrol.models.dto.table_dto import TableDTO
+from src.itaufluxcontrol.models.tables import Tables
+from src.itaufluxcontrol.service.table_service import TableService
 
 
 @pytest.fixture

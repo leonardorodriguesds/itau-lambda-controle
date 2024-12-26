@@ -1,6 +1,6 @@
 import pytest
 from pydantic import ValidationError
-from src.app.models.dto.table_dto import PartitionDTO, DependencyDTO, TaskDTO, TableDTO, validate_tables
+from src.itaufluxcontrol.models.dto.table_dto import PartitionDTO, DependencyDTO, TaskDTO, TableDTO, validate_tables
 
 def test_validate_tables():
     partitions = [PartitionDTO(name="partition1", type="string")]
