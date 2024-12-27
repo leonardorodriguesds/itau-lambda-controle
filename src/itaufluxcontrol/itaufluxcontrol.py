@@ -206,25 +206,30 @@ class ItauFluxControl:
         @self.inject_dependencies
         def run_migrations(logger: Logger):
             """
-            Rota que executa migrações do Alembic mediante uma palavra-chave no body.
+            Executa migrações do Alembic mediante uma palavra-chave no body.
             """
             body = self.app.current_event.json_body
             keyword = body.get("keyword")
 
-            if keyword != os.getenv("MIGRATION_KEYWORD", "RUN_MIGRATIONS"):
+            expected_keyword = os.getenv("MIGRATION_KEYWORD", "RUN_MIGRATIONS")
+            if keyword != expected_keyword:
                 logger.warning("Tentativa de executar migrações sem keyword válida.")
                 return {
                     "message": "Invalid or missing keyword. No migrations were run."
                 }
 
-            logger.info("Rodando migrações Alembic, pois keyword foi válida.")
-            alembic_cfg = Config("alembic.ini")
-            command.upgrade(alembic_cfg, "head")
-            logger.info("Migrações Alembic executadas com sucesso.")
+            try:
+                logger.info("Rodando migrações do Alembic.")
+                config_path = os.path.join(os.path.dirname(__file__), "../config/alembic.ini")
+                alembic_cfg = Config(config_path)
+                alembic_cfg.set_main_option("script_location", "src/itaufluxcontrol/alembic")
+                command.upgrade(alembic_cfg, "head")
+                logger.info("Migrações Alembic executadas com sucesso.")
+                return {"message": "Migrations ran successfully."}
+            except Exception as e:
+                logger.error(f"Erro ao executar migrações: {e}")
+                raise
 
-            return {
-                "message": "Migrations ran successfully."
-            }
 
     def define_approval_routes(self):
         """
