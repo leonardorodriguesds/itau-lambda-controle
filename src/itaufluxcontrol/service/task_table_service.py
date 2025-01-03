@@ -17,6 +17,10 @@ class TaskTableService:
         self.repository = repository
         self.task_executor_service = task_executor_service
         
+    def query(self, **filters):
+        self.logger.debug(f"[{self.__class__.__name__}] Querying task table with filters: [{filters}]")
+        return self.repository.query(**filters)
+        
     def find(self, task_id: Optional[int] = None, task_name: Optional[str] = None) -> TaskTable:
         self.logger.debug(f"[{self.__class__.__name__}] Finding task table by id: {task_id} or name: {task_name}")
         res = None
@@ -53,3 +57,7 @@ class TaskTableService:
 
         
         return self.repository.save(task_table)
+    
+    def delete(self, task_id: int):
+        self.logger.debug(f"[{self.__class__.__name__}] Deleting task table: [{task_id}]")
+        return self.repository.soft_delete(task_id)

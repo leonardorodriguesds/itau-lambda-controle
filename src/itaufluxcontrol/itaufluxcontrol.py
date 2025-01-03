@@ -12,6 +12,8 @@ from alembic import command
 from aws_lambda_powertools.event_handler import ApiGatewayResolver
 from aws_lambda_powertools.event_handler.exceptions import BadRequestError
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from itaufluxcontrol.service.task_schedule_service import TaskScheduleService
+from itaufluxcontrol.service.task_table_service import TaskTableService
 
 from src.itaufluxcontrol.models.dto.task_executor_dto import TaskExecutorDTO
 from src.itaufluxcontrol.models.dto.trigger_process_dto import TriggerProcess
@@ -21,7 +23,7 @@ from src.itaufluxcontrol.service.event_bridge_scheduler_service import EventBrid
 from src.itaufluxcontrol.service.task_executor_service import TaskExecutorService
 from src.itaufluxcontrol.service.task_service import TaskService
 from injector import Injector
-from src.itaufluxcontrol.models.dto.table_dto import TableDTO
+from src.itaufluxcontrol.models.dto.table_dto import TableDTO, TaskDTO
 from src.itaufluxcontrol.models.dto.table_partition_exec_dto import TablePartitionExecDTO
 from src.itaufluxcontrol.service.table_service import TableService
 from src.itaufluxcontrol.service.table_partition_exec_service import TablePartitionExecService
@@ -190,46 +192,125 @@ class ItauFluxControl:
         """
         Método que registra as rotas organizadas por entidade.
         """
-        self.define_migration_routes()
         self.define_approval_routes()
         self.define_table_routes()
         self.define_table_partition_exec_routes()  
         self.define_trigger_routes()
         self.define_task_executor_routes()
         self.define_health_route()
-
-    def define_migration_routes(self):
+        self.define_task_table_routes()
+        self.define_schedule_routes()
+        
+    def define_schedule_routes(self):
         """
-        Define as rotas relacionadas a migrações.
+        Define as rotas relacionadas a agendamentos de tarefas.
         """
-        @self.app.post("/run_migrations")
+        @self.app.get("/task-schedules")
         @self.inject_dependencies
-        def run_migrations(logger: Logger):
+        def get_task_schedules(
+            task_schedule_service: TaskScheduleService,
+            logger: Logger
+        ):
+            logger.debug(f"[{self.__class__.__name__}] Getting task schedules: {self.app.current_event.query_string_parameters}")
+            filters = self.app.current_event.query_string_parameters
+            tasks = task_schedule_service.query(**filters)
+            logger.debug(f"[{self.__class__.__name__}] Task schedules found: {tasks}")
+            return [task.json_dict() for task in tasks]
+
+        @self.app.delete("/task-schedules/<task_schedule_id>")
+        @self.inject_dependencies
+        @self.transactional
+        def delete_task_schedule(
+            task_schedule_id: int,
+            task_schedule_service: TaskScheduleService,
+            session_provider: SessionProvider,
+            logger: Logger
+        ):
+            logger.debug(f"[{self.__class__.__name__}] Deleting task schedule with ID: {task_schedule_id}")
+            task_schedule_service.delete(task_schedule_id)
+            logger.info(f"[{self.__class__.__name__}] Task schedule with ID {task_schedule_id} deleted successfully.")
+        
+    def define_task_table_routes(self):
+        """
+        Define as rotas relacionadas a tarefas e tabelas.
+        """
+        @self.app.route("/tasks", method="POST")
+        @self.inject_dependencies
+        @self.process_entities
+        def create_task(
+            task_table_service: TaskTableService,
+            entity_data: dict,
+            user: str,
+            session_provider: SessionProvider,
+            logger: Logger
+        ):
             """
-            Executa migrações do Alembic mediante uma palavra-chave no body.
+            Rota para criar uma nova tarefa.
             """
-            body = self.app.current_event.json_body
-            keyword = body.get("keyword")
+            task_dto = TaskDTO(**entity_data)
 
-            expected_keyword = os.getenv("MIGRATION_KEYWORD", "RUN_MIGRATIONS")
-            if keyword != expected_keyword:
-                logger.warning("Tentativa de executar migrações sem keyword válida.")
-                return {
-                    "message": "Invalid or missing keyword. No migrations were run."
-                }
+            if task_dto.id:
+                raise BadRequestError("ID não deve ser fornecido para criação de tarefa")
 
-            try:
-                logger.info("Rodando migrações do Alembic.")
-                config_path = os.path.join(os.path.dirname(__file__), "../config/alembic.ini")
-                alembic_cfg = Config(config_path)
-                alembic_cfg.set_main_option("script_location", "src/itaufluxcontrol/alembic")
-                command.upgrade(alembic_cfg, "head")
-                logger.info("Migrações Alembic executadas com sucesso.")
-                return {"message": "Migrations ran successfully."}
-            except Exception as e:
-                logger.error(f"Erro ao executar migrações: {e}")
-                raise
+            task = task_table_service.save(task_dto, user)
+            logger.info(f"Tarefa criada com sucesso: {task}")
+            return {"message": f"Task created successfully: {task}"}
 
+        @self.app.put("/tasks/<task_id>", summary="Atualizar uma tarefa existente", tags=["Tasks"])
+        @self.inject_dependencies
+        @self.process_entities
+        def update_task(
+            task_id: int,
+            task_table_service: TaskTableService,
+            entity_data: dict,
+            user: str,
+            session_provider: SessionProvider,
+            logger: Logger
+        ):
+            """
+            Rota para atualizar uma tarefa existente.
+            """
+            if not task_id:
+                raise BadRequestError("Task ID is required for update")
+
+            task_dto = TaskDTO(**entity_data)
+            task_dto.id = task_id
+
+            message = task_table_service.save(task_dto, user)
+            logger.info(f"Tarefa atualizada com sucesso: {message}")
+            return {"message": f"Task updated successfully: {message}"}
+
+        @self.app.delete("/tasks/<task_id>", summary="Excluir uma tarefa por ID", tags=["Tasks"])
+        @self.inject_dependencies
+        @self.transactional
+        def delete_task(
+            task_id: int,
+            task_table_service: TaskTableService,
+            session_provider: SessionProvider,
+            logger: Logger
+        ):
+            """
+            Rota para excluir uma tarefa específica pelo seu ID.
+            """
+            if not task_id:
+                raise BadRequestError("Task ID is required for deletion")
+
+            logger.info(f"Attempting to delete task with ID: {task_id}")
+            task_table_service.delete(task_id)
+            logger.info(f"Task with ID: {task_id} deleted successfully.")
+            return {"message": f"Task with ID {task_id} deleted successfully."}
+        
+        @self.app.get("/tasks-tables")
+        @self.inject_dependencies
+        def get_tasks_tables(
+            task_table_service: TaskTableService,
+            logger: Logger
+        ):
+            logger.debug(f"[{self.__class__.__name__}] Getting tasks: {self.app.current_event.query_string_parameters}")
+            filters = self.app.current_event.query_string_parameters
+            tasks = task_table_service.query(**filters)
+            logger.debug(f"[{self.__class__.__name__}] Tasks found: {tasks}")
+            return [task.json_dict() for task in tasks]
 
     def define_approval_routes(self):
         """
@@ -277,6 +358,18 @@ class ItauFluxControl:
 
             logger.info("Event processed successfully.")
             return {"message": "Task rejected successfully."}
+        
+        @self.app.get("/approval-status")
+        @self.inject_dependencies
+        def get_approval_status(
+            approval_status_service: ApprovalStatusService,
+            logger: Logger
+        ):
+            logger.debug(f"[{self.__class__.__name__}] Getting approval status: {self.app.current_event.query_string_parameters}")
+            filters = self.app.current_event.query_string_parameters
+            approval_status = approval_status_service.query(**filters)
+            logger.debug(f"[{self.__class__.__name__}] Approval status found: {approval_status}")
+            return [status.json_dict() for status in approval_status]
 
     def define_table_routes(self):
         """
@@ -381,6 +474,17 @@ class ItauFluxControl:
             message = table_partition_exec_service.register_partitions_exec(execution_dto)
             logger.info("Execution registered successfully.")
             return {"message": "Execution registered successfully."}
+        
+        @self.app.get("/executions")
+        @self.inject_dependencies
+        def get_executions(
+            table_partition_exec_service: TablePartitionExecService,
+            logger: Logger
+        ):
+            logger.debug(f"[{self.__class__.__name__}] Getting executions: {self.app.current_event.query_string_parameters}")
+            filters = self.app.current_event.query_string_parameters
+            executions = table_partition_exec_service.query(**filters)
+            logger.debug(f"[{self.__class__.__name__}] Executions found: {executions}")
 
     def define_trigger_routes(self):
         """
@@ -487,6 +591,18 @@ class ItauFluxControl:
 
             logger.info("Event processed successfully.")
             return {"message": "Task executor deleted successfully."}
+        
+        @self.app.get("/task_executor")
+        @self.inject_dependencies
+        def get_task_executors(
+            task_executor_service: TaskExecutorService,
+            logger: Logger
+        ):
+            logger.debug(f"[{self.__class__.__name__}] Getting task executors: {self.app.current_event.query_string_parameters}")
+            filters = self.app.current_event.query_string_parameters
+            task_executors = task_executor_service.query(**filters)
+            logger.debug(f"[{self.__class__.__name__}] Task executors found: {task_executors}")
+            return [task.json_dict() for task in task_executors]
 
     def define_health_route(self):
         """

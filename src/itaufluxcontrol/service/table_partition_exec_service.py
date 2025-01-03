@@ -24,6 +24,10 @@ class TablePartitionExecService:
         self.partition_service = partition_service
         self.event_bridge_scheduler_service = event_bridge_scheduler_service
         self.cloudwatch_service = cloudwatch_service
+        
+    def query(self, **filters):
+        self.logger.debug(f"[{self.__class__.__name__}] Querying table partition exec with filters: [{filters}]")
+        return self.repository.query(**filters)
 
     def get_by_execution(self, execution_id: int) -> List[TablePartitionExec]:
         return self.repository.get_by_execution(execution_id)

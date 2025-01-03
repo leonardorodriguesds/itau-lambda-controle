@@ -12,6 +12,10 @@ class TaskExecutorService:
     def __init__(self, logger: Logger, repository: TaskExecutorRepository):
         self.logger = logger
         self.repository = repository
+        
+    def query(self, **filters):
+        self.logger.debug(f"[{self.__class__.__name__}] Querying task executor with filters: [{filters}]")
+        return self.repository.query(**filters)
 
     def find(self, task_executor_id: Optional[int] = None, alias: Optional[str] = None):
         self.logger.debug(f"[{self.__class__.__name__}] Finding task executor: [{task_executor_id}] [{alias}]")

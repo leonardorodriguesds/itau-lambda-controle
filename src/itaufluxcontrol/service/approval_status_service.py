@@ -13,6 +13,10 @@ class ApprovalStatusService:
         self.logger = logger
         self.repository = repository
         
+    def query(self, **filters):
+        self.logger.debug(f"[{self.__class__.__name__}] Querying approval status with filters: [{filters}]")
+        return self.repository.query(**filters)
+        
     def find(self, id: int) -> ApprovalStatus:
         self.logger.debug(f"[{self.__class__.__name__}] Finding approval status: [{id}]")
         return self.repository.get_by_id(id)

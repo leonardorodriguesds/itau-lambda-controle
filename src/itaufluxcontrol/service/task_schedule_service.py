@@ -37,5 +37,6 @@ class TaskScheduleService:
         self.logger.debug(f"[{self.__class__.__name__}] Querying task schedule with filters: {filters}")
         return self.repository.query(**filters)
 
-
-        
+    def delete(self, task_schedule_id: int):
+        self.logger.debug(f"[{self.__class__.__name__}] Deleting task schedule: [{task_schedule_id}]")
+        return self.repository.soft_delete(task_schedule_id)
